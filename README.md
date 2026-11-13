@@ -43,17 +43,18 @@
 :::: tabs
 ::: tab-item 功能截图
 
-| 设置页面 | 设置页面 | 设置页面 | 设置页面 |
+| **🏷️ 标记数据** | **🧭 阅读导航** | **✈️ Telegram 监控** | **🧹 内容管理** |
 |---|---|---|---|
-| **🏷️ 标记数据**<br>![标记数据设置](https://cdn.nodeimage.com/i/CqEBn3ihouhehErmEzYNJ5ZQFPSiyAke.png) | **🧭 阅读导航**<br>![阅读导航设置](https://cdn.nodeimage.com/i/Yl2wNhGbiCobc3JesJNJXUfiRqqiA0Vn.png) | **✈️ Telegram 监控**<br>![✈️ Telegram 监控设置](https://cdn.nodeimage.com/i/AnT0FbkOCNQ3qpcsRYNaqL92vGoQZCKk.png) | **🧹 内容管理**<br>![内容管理设置](https://cdn.nodeimage.com/i/xU0UPOtAjJJMUTTHGOlrFXYVXa4zrYrW.png) |
-| **🖼️ 图床配置**<br>![图床设置](https://cdn.nodeimage.com/i/Ihyjh4NjNLOkK72bWuYCVL7zSAfNI0jq.png) | **🎁 抽奖通知**<br>![抽奖通知设置](https://cdn.nodeimage.com/i/4L1PuQp9QN2O84Vk7hp0hXArHkuiEoW9.png) | **👣 访问足迹**<br>![访问足迹设置](https://cdn.nodeimage.com/i/4xZ7jB115NC4qtETabLGEx2rEtd5TAVr.png) |  |
+| ![标记数据设置](https://cdn.nodeimage.com/i/CqEBn3ihouhehErmEzYNJ5ZQFPSiyAke.png) | ![阅读导航设置](https://cdn.nodeimage.com/i/Yl2wNhGbiCobc3JesJNJXUfiRqqiA0Vn.png) | ![✈️ Telegram 监控设置](https://cdn.nodeimage.com/i/AnT0FbkOCNQ3qpcsRYNaqL92vGoQZCKk.png) | ![内容管理设置](https://cdn.nodeimage.com/i/xU0UPOtAjJJMUTTHGOlrFXYVXa4zrYrW.png) |
+| **🖼️ 图床配置** | **🎁 抽奖通知** | **👣 访问足迹** |
+| ![图床设置](https://cdn.nodeimage.com/i/Ihyjh4NjNLOkK72bWuYCVL7zSAfNI0jq.png) | ![抽奖通知设置](https://cdn.nodeimage.com/i/4L1PuQp9QN2O84Vk7hp0hXArHkuiEoW9.png) | ![访问足迹设置](https://cdn.nodeimage.com/i/4xZ7jB115NC4qtETabLGEx2rEtd5TAVr.png) |  |
 
 :::
 ::: tab-item 效果预览
 
-| 页面效果 | 页面效果 | 页面效果 | 页面效果 |
+| **📊 等级和每日进度** | **🔎 关注主题高亮** | **📬 私信预览** | **📬 提及与回复预览** |
 |---|---|---|---|
-| **📊 等级和每日进度**<br>![等级和每日进度](https://cdn.nodeimage.com/i/OunbvOYznfpQbMHErUXMcPb0lZRNd2Kk.png) | **🔎 关键词标记**<br>![关键词标记](https://cdn.nodeimage.com/i/DMP1aC9d88sGVN63PljzJ6qXbfbQj50l.png) | **📬 私信预览**<br>![私信预览](https://cdn.nodeimage.com/i/KwXqqbm9uO0X3vsqvmvA0kdjgkhmNnLY.png) | **📬 提及与回复预览**<br>![提及与回复预览](https://cdn.nodeimage.com/i/S7qLV2RzBMwpVYLPohMPolu5YGEtk9Hs.png) |
+| ![等级和每日进度](https://cdn.nodeimage.com/i/OunbvOYznfpQbMHErUXMcPb0lZRNd2Kk.png) | ![关键词标记](https://cdn.nodeimage.com/i/jxTTB3kESeK47ZcHI4AXHnSXcaVOZz92.webp) | ![私信预览](https://cdn.nodeimage.com/i/KwXqqbm9uO0X3vsqvmvA0kdjgkhmNnLY.png) | ![提及与回复预览](https://cdn.nodeimage.com/i/S7qLV2RzBMwpVYLPohMPolu5YGEtk9Hs.png) |
 
 :::
 ::::

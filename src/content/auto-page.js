@@ -377,6 +377,8 @@ async function loadAndAppendAutoPage(pageUrl) {
   appendAutoPageItems(pageDocument, responseUrl);
   if (isPostDetailPath(responseUrl.pathname)) {
     syncAutoPageDetailPagers(pageDocument);
+  } else {
+    syncAutoPageListPagers(pageDocument);
   }
   autoPageAppendLoadedUrls.add(normalizeAutoPageUrl(responseUrl.toString()));
   setAutoPageAppendNextUrl(getNextAutoPageUrl(pageDocument, responseUrl));
@@ -388,6 +390,24 @@ function syncAutoPageDetailPagers(pageDocument) {
     const currentPager = document.querySelector(selector);
     const sourcePager = pageDocument.querySelector(selector);
     if (!currentPager || !sourcePager) return;
+
+    const nextPager = document.importNode(sourcePager, true);
+    const currentPage = nextPager.querySelector(".pager-pos.pager-cur");
+    nextPager.querySelectorAll(".pager-pos[aria-current]").forEach((pageLink) => {
+      if (pageLink !== currentPage) pageLink.removeAttribute("aria-current");
+    });
+    currentPage?.setAttribute("aria-current", "page");
+    currentPager.replaceWith(nextPager);
+  });
+}
+
+function syncAutoPageListPagers(pageDocument) {
+  const currentPagers = Array.from(document.querySelectorAll(".nsk-pager"));
+  const sourcePagers = Array.from(pageDocument.querySelectorAll(".nsk-pager"));
+
+  currentPagers.forEach((currentPager, index) => {
+    const sourcePager = sourcePagers[index];
+    if (!sourcePager) return;
 
     const nextPager = document.importNode(sourcePager, true);
     const currentPage = nextPager.querySelector(".pager-pos.pager-cur");
@@ -720,7 +740,7 @@ function getPostListRouteKey(url) {
   const routeUrl = new URL(url.href);
   const pathPage = getPostListPathPage(routeUrl.pathname);
   routeUrl.hash = "";
-  routeUrl.pathname = pathPage?.pathname || routeUrl.pathname;
+  routeUrl.pathname = normalizePostListPathname(pathPage?.pathname || routeUrl.pathname);
   routeUrl.searchParams.delete("page");
   return `${routeUrl.pathname}?${getSortedSearchParams(routeUrl.searchParams)}`;
 }
