@@ -5,7 +5,7 @@
 🔗 **安装地址**
 
 - [原版 Chrome Web Store 安装](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
-- [✈️ TG 私信通知版](https://github.com/NodeSeekers/NodeSeeker/releases/download/v1.0.20/nodeseeker-v1.0.20.zip)
+- [✈️ TG 私信通知版](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip)
 
 🔗 **开源地址**
 
@@ -59,7 +59,7 @@
 
 ## 📥 安装
 
-1. 下载并解压项目。
+1. [下载最新版本安装包](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip)，解压安装包。
 2. 在 Chrome 打开 `chrome://extensions`，开启“开发者模式”。
 3. 点击“加载已解压的扩展程序”，选择项目目录。
 4. 打开扩展选项页，按需配置和开启功能。
