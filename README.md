@@ -7,6 +7,10 @@
 - [原版 Chrome Web Store 安装](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
 - [✈️ TG 私信通知版](https:://aaa.com)
 
+🔗 **开源地址**
+
+- [GitHub：NodeSeekers/NodeSeeker](https://github.com/NodeSeekers/NodeSeeker)
+
 > [!tip]
 > 安装插件->登录账号
 > 不用打开NS，不用第三方托管，不用服务器部署，数据就在本地
