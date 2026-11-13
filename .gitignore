@@ -1,0 +1,27 @@
+node_modules/
+.debug/
+test-results/
+playwright-report/
+dist/
+
+# Local credentials and machine-specific files
+.env
+.env.*
+!.env.example
+.DS_Store
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Browser captures, local databases, and exported personal data
+*.har
+*.log
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+*.db-*
+nodeseek-helper-config-*.json
+nodeseek-helper-data-*.json
+nodeseek-config.json

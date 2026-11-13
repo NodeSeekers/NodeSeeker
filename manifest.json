@@ -1,0 +1,94 @@
+{
+  "action": {
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "32": "assets/icon32.png",
+      "48": "assets/icon48.png",
+      "128": "assets/icon128.png"
+    },
+    "default_title": "NodeSeek Helper"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "src/main-world/editor-bridge.js",
+        "src/main-world/auto-attendance.js"
+      ],
+      "matches": [
+        "https://www.nodeseek.com/*"
+      ],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "css": [
+        "src/avatar-effects.css",
+        "src/content.css"
+      ],
+      "js": [
+        "src/shortcuts.js",
+        "src/content/config.js",
+        "src/content/auto-attendance.js",
+        "src/content/dialog.js",
+        "src/content/editor-upload.js",
+        "src/content/auto-page.js",
+        "src/content/message-entry.js",
+        "src/content/attendance-reminder.js",
+        "src/content/lucky-actions.js",
+        "src/content/editor-format-tools.js",
+        "src/content/quick-phrases.js",
+        "src/content/profile.js",
+        "src/content/block-filter.js",
+        "src/content/follow-rules.js",
+        "src/content/post-switcher.js",
+        "src/content/visit-history.js",
+        "src/content/image-preview.js",
+        "src/content/link-purifier.js",
+        "src/content/index.js"
+      ],
+      "matches": [
+        "https://www.nodeseek.com/*"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "description": "NodeSeek 非官方插件，提供用户标签、内容管理、趋势图、自动传图、签到提醒、阅读导航、快捷评论、快捷短语、抽奖和私信通知、访问历史等实用功能",
+  "host_permissions": [
+    "https://www.nodeseek.com/*",
+    "https://rss.nodeseek.com/*",
+    "https://api.drand.sh/*",
+    "https://api.nodeimage.com/*",
+    "https://api.telegram.org/*"
+  ],
+  "optional_host_permissions": [
+    "https://bit.ly/*",
+    "https://t.co/*",
+    "https://t.cn/*",
+    "https://ow.ly/*",
+    "https://is.gd/*",
+    "https://buff.ly/*",
+    "https://tinyurl.com/*",
+    "https://shorturl.at/*",
+    "https://rebrand.ly/*",
+    "https://b23.tv/*"
+  ],
+  "icons": {
+    "16": "assets/icon16.png",
+    "32": "assets/icon32.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "manifest_version": 3,
+  "name": "NodeSeek Helper",
+  "options_page": "options/options.html",
+  "permissions": [
+    "alarms",
+    "notifications",
+    "storage",
+    "unlimitedStorage"
+  ],
+  "version": "1.0.12"
+}

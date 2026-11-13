@@ -1,0 +1,15 @@
+{
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
+  },
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "package": "node scripts/package-extension.mjs",
+    "package:local": "node scripts/package-local.mjs",
+    "debug:browser": "node scripts/debug-browser.mjs",
+    "debug:cdp": "node scripts/start-cdp-browser.mjs",
+    "reload:cdp": "node scripts/reload-cdp-extension.mjs",
+    "test:cdp": "node scripts/probe-cdp.mjs"
+  }
+}

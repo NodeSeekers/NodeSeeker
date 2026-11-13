@@ -1,0 +1,168 @@
+const AUTO_ATTENDANCE_ALARM_NAME = "nshAttendance:auto";
+const AUTO_ATTENDANCE_STATE_KEY = "nshAutoAttendanceState";
+const AUTO_ATTENDANCE_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+const AUTO_ATTENDANCE_FIRST_CHECK_DELAY_MS = 60 * 1000;
+
+async function scheduleAutoAttendanceAlarm(runImmediately = false) {
+  const config = await chrome.storage.local.get({
+    autoAttendanceEnabled: false,
+    [AUTO_ATTENDANCE_STATE_KEY]: null
+  });
+  if (!config.autoAttendanceEnabled) {
+    await chrome.alarms.clear(AUTO_ATTENDANCE_ALARM_NAME);
+    return;
+  }
+
+  const now = Date.now();
+  const dateKey = getAutoAttendanceDateKey(now);
+  const previous = config[AUTO_ATTENDANCE_STATE_KEY];
+  const succeededToday = previous?.dateKey === dateKey && previous.status === "success";
+  if (runImmediately && !succeededToday) {
+    chrome.alarms.create(AUTO_ATTENDANCE_ALARM_NAME, {
+      when: now + AUTO_ATTENDANCE_RETRY_INTERVAL_MS
+    });
+    runAutoAttendance().catch(() => {});
+    return;
+  }
+
+  let nextAttemptAt;
+  if (succeededToday) {
+    nextAttemptAt = getNextAutoAttendanceMidnightTimestamp(now);
+  } else if (previous?.dateKey === dateKey
+    && (previous.status === "failed" || previous.status === "pending")) {
+    const attemptedAt = Number(previous.attemptedAt) || 0;
+    nextAttemptAt = Math.max(now + 30_000, attemptedAt + AUTO_ATTENDANCE_RETRY_INTERVAL_MS);
+  } else {
+    nextAttemptAt = now + AUTO_ATTENDANCE_FIRST_CHECK_DELAY_MS;
+  }
+  chrome.alarms.create(AUTO_ATTENDANCE_ALARM_NAME, { when: nextAttemptAt });
+}
+
+async function runAutoAttendance() {
+  const config = await chrome.storage.local.get({
+    autoAttendanceEnabled: false,
+    autoAttendanceMode: "random",
+    [AUTO_ATTENDANCE_STATE_KEY]: null
+  });
+  if (!config.autoAttendanceEnabled) return;
+
+  const dateKey = getAutoAttendanceDateKey(Date.now());
+  const now = Date.now();
+  const previous = config[AUTO_ATTENDANCE_STATE_KEY];
+  if (previous?.dateKey === dateKey
+      && (previous.status === "success" || now - Number(previous.attemptedAt || 0) < AUTO_ATTENDANCE_RETRY_INTERVAL_MS)) {
+    await scheduleAutoAttendanceAlarm();
+    return;
+  }
+
+  await chrome.storage.local.set({
+    [AUTO_ATTENDANCE_STATE_KEY]: { dateKey, status: "pending", attemptedAt: now }
+  });
+  try {
+    const mode = config.autoAttendanceMode === "fixed" ? "fixed" : "random";
+    const result = await requestAutoAttendanceInNodeSeekPage(mode, dateKey);
+    await saveAutoAttendanceResult(dateKey, "success", Number(result.gain), Date.now(), mode);
+  } catch (error) {
+    await chrome.storage.local.set({
+      [AUTO_ATTENDANCE_STATE_KEY]: {
+        dateKey,
+        mode: config.autoAttendanceMode === "fixed" ? "fixed" : "random",
+        status: "failed",
+        attemptedAt: now,
+        error: String(error?.message || "签到失败").slice(0, 120)
+      }
+    });
+    await scheduleAutoAttendanceAlarm();
+  }
+}
+
+async function requestAutoAttendanceInNodeSeekPage(mode, dateKey) {
+  const tab = await chrome.tabs.create({ url: "https://www.nodeseek.com/board", active: false });
+  const createdTabId = tab.id;
+
+  try {
+    if (createdTabId) await waitForAutoAttendanceTab(tab);
+    let lastError;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {
+          type: "attendance:perform",
+          payload: { mode, dateKey }
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt < 11) await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      if (response?.ok !== true) throw new Error(String(response?.error || "签到请求失败"));
+      return response.result;
+    }
+    throw lastError || new Error("无法连接 NodeSeek 页面");
+  } finally {
+    if (createdTabId) {
+      await chrome.tabs.remove(createdTabId).catch(() => {});
+    }
+  }
+}
+
+function waitForAutoAttendanceTab(tab) {
+  if (tab.status === "complete") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => finish(new Error("NodeSeek 页面加载超时")), 20_000);
+    const listener = (tabId, changeInfo) => {
+      if (tabId === tab.id && changeInfo.status === "complete") finish();
+    };
+    function finish(error) {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(listener);
+      if (error) reject(error);
+      else resolve();
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function saveAutoAttendanceResult(dateKey, status, gain, attemptedAt, mode = "random") {
+  await chrome.storage.local.set({
+    nshAttendanceReminder: {
+      dateKey,
+      gain: Number.isFinite(gain) && gain > 0 ? Math.floor(gain) : 1,
+      signedAt: new Date(attemptedAt).toISOString(),
+      checkedAt: attemptedAt,
+      recordId: 0,
+      dayId: 0
+    },
+    [AUTO_ATTENDANCE_STATE_KEY]: {
+      dateKey,
+      mode,
+      status,
+      attemptedAt,
+      gain: Math.max(0, Math.floor(Number(gain) || 0))
+    }
+  });
+  await scheduleAutoAttendanceAlarm();
+}
+
+function getAutoAttendanceDateKey(timestamp) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(timestamp);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getNextAutoAttendanceMidnightTimestamp(timestamp) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(timestamp);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const nextDayUtc = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day) + 1);
+  return nextDayUtc - 8 * 60 * 60 * 1000;
+}

@@ -1,0 +1,18 @@
+importScripts(
+  "background/constants.js",
+  "background/database.js",
+  "background/database-sync.js",
+  "background/message-router.js",
+  "background/profile-store.js",
+  "background/lucky-notifications.js",
+  "background/telegram-notifications.js",
+  "background/link-purifier.js",
+  "background/attendance.js",
+  "background/preloaded-config.js",
+  "background/visit-history.js",
+  "background/profile-retention.js",
+  "background/common.js",
+  "background/options.js",
+  "background/image-upload.js",
+  "background/bootstrap.js"
+);

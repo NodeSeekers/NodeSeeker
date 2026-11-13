@@ -1,0 +1,902 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>NodeSeek Helper 设置</title>
+    <link rel="stylesheet" href="../src/avatar-effects.css">
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="options-shell">
+      <aside class="options-sidebar">
+        <h1>NodeSeek Helper</h1>
+        <nav class="options-menu" aria-label="设置菜单">
+          <button class="menu-button active" type="button" data-panel-target="label-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"></path>
+              <path d="M7.5 7.5h.01"></path>
+            </svg>
+            <span>标签数据</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="auto-page-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 3h10l4 4v14H5V3Z"></path>
+              <path d="M15 3v5h4"></path>
+              <path d="M8 12h8"></path>
+              <path d="M8 15h7"></path>
+              <path d="M8 18h5"></path>
+            </svg>
+            <span>阅读导航</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="telegram-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 2 11 13"></path><path d="m22 2-7 20-4-9-9-4Z"></path>
+            </svg>
+            <span>Telegram</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="quick-phrase-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"></path>
+              <path d="M8 9h8"></path>
+              <path d="M8 13h5"></path>
+            </svg>
+            <span>快捷短语</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="block-filter-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>
+            </svg>
+            <span>内容管理</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="image-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+              <circle cx="8.5" cy="10" r="1.5"></circle>
+              <path d="m21 15-5-5L5 19"></path>
+            </svg>
+            <span>图床配置</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="lucky-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7"></path>
+              <path d="M2 7h20v5H2z"></path>
+              <path d="M12 22V7"></path>
+              <path d="M12 7H7.5A2.5 2.5 0 1 1 10 4.5c0 1.7-2 2.5-2 2.5"></path>
+              <path d="M12 7h4.5A2.5 2.5 0 1 0 14 4.5c0 1.7 2 2.5 2 2.5"></path>
+            </svg>
+            <span>抽奖通知</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="visit-history-panel">
+            <svg class="menu-icon menu-icon-footprints" viewBox="0 0 1024 1024" aria-hidden="true">
+              <path d="M426.80832 115.688702c27.197344-1.299873 48.195293-27.897276 45.795527-57.894346-2.499756-31.296944-29.997071-58.294307-58.394297-57.494385-28.497217.799922-46.095498 24.297627-43.395762 57.694365 2.899717 34.796602 26.497412 59.094229 55.994532 57.694366zM206.02988 141.586173c20.897959 7.299287 45.095596-5.899424 52.394883-28.597207 8.099209-25.197539-4.39957-52.294893-27.697295-60.294112-21.897862-7.499268-44.995606 4.699541-52.494874 27.697295-7.599258 23.497705 6.099404 53.594766 27.797286 61.194024zM300.120691 111.789083c22.597793 4.599551 45.895518-12.398789 50.295089-36.896397 4.899522-27.197344-11.798848-53.594766-37.096378-58.594278-23.697686-4.699541-45.995508 11.198906-50.595059 35.996485-4.699541 25.39752 13.798652 54.694659 37.396348 59.49419z"></path>
+              <path d="M158.434528 191.981252c18.798164-.699932 33.89669-18.698174 32.696807-38.896202-1.399863-22.497803-19.698076-40.096084-40.696026-39.196172-19.698076.899912-34.19666 17.698272-32.996778 38.29626 1.199883 20.897959 21.39791 40.496045 40.995997 39.796114zM148.935456 225.37799c-3.799629-18.598184-13.598672-35.196563-39.396153-32.896787-24.197637 2.099795-30.097061 19.298115-27.897276 37.696319 2.299775 18.798164 14.098623 33.296748 37.196368 32.296846 24.297627-1.099893 30.697002-17.798262 30.097061-37.096378zM469.104189 239.976565c0 1.399863 0 2.899717-.09999 4.49956-1.199883 19.698076-5.799434 34.796602-8.699151 42.795821-8.099209 22.397813-12.098818 33.496729-29.097158 64.693682-30.796992 56.294502-31.596914 115.988673-31.996875 143.985939-.599941 45.595547-.999902 71.193048 15.998437 95.990626 10.498975 15.298506 23.397715 24.297627 31.996876 47.995313.999902 2.899717 8.799141 25.097549 5.999414 47.995313-5.699443 45.895518-53.994727 93.190899-111.989064 95.990626-1.899814.09999-3.699639.09999-5.499463.09999-50.89503 0-89.691241-34.396641-106.489601-64.093741-10.798945-19.198125-14.598574-39.996094-15.998437-47.995313-1.399863-7.499268-2.099795-14.398594-2.399766-20.797969-1.099893-22.497803 1.799824-39.396153 2.399766-43.195781 5.199492-32.996778-16.89835-111.289132-53.994727-175.982814-12.69876-22.097842-30.896983-49.195196-31.596915-88.791329 0 0-.09999-10.798945 1.399864-22.097842 11.798848-90.191192 81.692022-141.386193 170.483351-178.28259 12.89874-5.299482 39.696123-12.69876 68.09335-12.69876 25.69749 0 52.594864 5.999414 71.792989 25.097549 29.397129 29.197149 29.6971 79.792208 29.6971 84.79172zM653.186212 298.070892c2.699736-33.396739-14.898545-56.894444-43.395762-57.694366-28.397227-.799922-55.894542 26.197442-58.394297 57.494385-2.399766 29.997071 18.598184 56.594473 45.795527 57.894346 29.497119 1.299873 53.094815-22.997754 55.994532-57.694365zM817.97012 381.562738c21.697881-7.599258 35.396543-37.696319 27.797286-61.094034-7.499268-22.997754-30.597012-35.196563-52.494874-27.697295-23.397715 7.999219-35.796504 35.096573-27.697295 60.294112 7.199297 22.597793 31.496924 35.796504 52.394883 28.497217zM723.979299 351.765648c23.597696-4.799531 41.995899-34.19666 37.396348-59.49419-4.599551-24.897569-26.897373-40.796016-50.595059-35.996485-25.29753 4.999512-41.995899 31.396934-37.096377 58.594278 4.29958 24.497608 27.597305 41.595938 50.295088 36.896397z"></path>
+              <path d="M865.665462 431.957817c19.598086.699932 39.796114-18.898154 40.995997-39.796114 1.199883-20.497998-13.398692-37.396348-32.996778-38.29626-20.997949-.899912-39.296162 16.698369-40.696026 39.196172-1.299873 20.198028 13.898643 38.19627 32.696807 38.896202zM875.064544 465.354555c-.699932 19.198125 5.699443 35.996485 30.097061 36.996387 23.097744.999902 34.896592-13.498682 37.196368-32.296846 2.199785-18.398203-3.699639-35.596524-27.897276-37.696318-25.797481-2.199785-35.596524 14.398594-39.396153 32.996777zM896.462455 583.143052c-.699932 39.596133-18.898154 66.693487-31.596915 88.791329-37.096377 64.693682-59.194219 142.986037-53.994727 175.982815.599941 3.899619 3.499658 20.697979 2.399766 43.195781-.299971 6.299385-.999902 13.198711-2.399766 20.797969-1.399863 7.999219-5.199492 28.797188-15.998437 47.995313-16.79836 29.6971-55.594571 64.093741-106.489601 64.093741-1.799824 0-3.699639-.09999-5.499463-.09999-57.994336-2.799727-106.28962-50.095108-111.989063-95.990626-2.799727-22.897764 4.999512-45.095596 5.999414-47.995313 8.59916-23.797676 21.497901-32.796797 31.996875-47.995313 16.99834-24.797578 16.598379-50.395079 15.998438-95.990626-.399961-27.997266-1.199883-87.691436-31.996876-143.985939-16.99834-31.196953-21.09794-42.29587-29.097158-64.693682-2.899717-7.999219-7.599258-23.097744-8.699151-42.795821-.09999-1.599844-.09999-2.999707-.09999-4.49956 0-4.999512.399961-55.594571 29.79709-84.79172 19.098135-19.098135 46.095498-25.097549 71.792989-25.097549 28.397227 0 55.19461 7.399277 68.093351 12.69876 88.791329 36.796407 158.684503 87.991407 170.483351 178.282589 1.299873 11.298897 1.299873 22.097842 1.299873 22.097842z"></path>
+            </svg>
+            <span>访问足迹</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="sync-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 12a9 9 0 0 0-15-6.7L3 8"></path>
+              <path d="M3 3v5h5"></path>
+              <path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"></path>
+              <path d="M21 21v-5h-5"></path>
+            </svg>
+            <span>同步备份</span>
+          </button>
+          <button class="menu-button" type="button" data-panel-target="about-panel">
+            <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 16v-4"></path>
+              <path d="M12 8h.01"></path>
+            </svg>
+            <span>关于扩展</span>
+          </button>
+        </nav>
+      </aside>
+
+      <form id="options-form" class="options-content">
+        <section id="label-panel" class="options-panel">
+          <div class="panel-heading">
+            <h2>标签数据</h2>
+            <label class="switch">
+              <input id="userStatsEnabled" name="userStatsEnabled" class="switch-input" type="checkbox" aria-label="启用标签数据">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <section class="config-group" aria-labelledby="visibleLabelsTitle">
+            <h3 id="visibleLabelsTitle">展示标签</h3>
+            <div id="profileLabelFields" class="label-field-grid"></div>
+            <p class="config-description">勾选后会显示在帖子用户名后方，可拖动排序，默认展示 Lv、鸡腿、主题、评论、加入。</p>
+            <label>
+              <span>标签尺寸</span>
+              <select id="profileLabelSize" name="profileLabelSize">
+                <option value="large">大号</option>
+                <option value="standard">标准</option>
+                <option value="small">小号</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="config-group color-config" aria-labelledby="labelColorTitle">
+            <h3 id="labelColorTitle">标签颜色</h3>
+            <div class="color-grid">
+              <label class="color-row">
+                <span>Lv 1</span>
+                <span class="color-controls">
+                  <input id="levelColor1" name="levelColor1" type="color" data-level-color="1">
+                  <input id="levelColorAlpha1" class="color-alpha-input" name="levelColorAlpha1" type="number" min="0" max="100" step="1" inputmode="numeric" data-level-alpha="1" aria-label="Lv 1 透明度">
+                  <span class="color-alpha-unit">%</span>
+                </span>
+              </label>
+              <label class="color-row">
+                <span>Lv 2</span>
+                <span class="color-controls">
+                  <input id="levelColor2" name="levelColor2" type="color" data-level-color="2">
+                  <input id="levelColorAlpha2" class="color-alpha-input" name="levelColorAlpha2" type="number" min="0" max="100" step="1" inputmode="numeric" data-level-alpha="2" aria-label="Lv 2 透明度">
+                  <span class="color-alpha-unit">%</span>
+                </span>
+              </label>
+              <label class="color-row">
+                <span>Lv 3</span>
+                <span class="color-controls">
+                  <input id="levelColor3" name="levelColor3" type="color" data-level-color="3">
+                  <input id="levelColorAlpha3" class="color-alpha-input" name="levelColorAlpha3" type="number" min="0" max="100" step="1" inputmode="numeric" data-level-alpha="3" aria-label="Lv 3 透明度">
+                  <span class="color-alpha-unit">%</span>
+                </span>
+              </label>
+              <label class="color-row">
+                <span>Lv 4</span>
+                <span class="color-controls">
+                  <input id="levelColor4" name="levelColor4" type="color" data-level-color="4">
+                  <input id="levelColorAlpha4" class="color-alpha-input" name="levelColorAlpha4" type="number" min="0" max="100" step="1" inputmode="numeric" data-level-alpha="4" aria-label="Lv 4 透明度">
+                  <span class="color-alpha-unit">%</span>
+                </span>
+              </label>
+              <label class="color-row">
+                <span>Lv 5</span>
+                <span class="color-controls">
+                  <input id="levelColor5" name="levelColor5" type="color" data-level-color="5">
+                  <input id="levelColorAlpha5" class="color-alpha-input" name="levelColorAlpha5" type="number" min="0" max="100" step="1" inputmode="numeric" data-level-alpha="5" aria-label="Lv 5 透明度">
+                  <span class="color-alpha-unit">%</span>
+                </span>
+              </label>
+              <label class="color-row">
+                <span>Lv 6</span>
+                <span class="color-controls">
+                  <input id="levelColor6" name="levelColor6" type="color" data-level-color="6">
+                  <input id="levelColorAlpha6" class="color-alpha-input" name="levelColorAlpha6" type="number" min="0" max="100" step="1" inputmode="numeric" data-level-alpha="6" aria-label="Lv 6 透明度">
+                  <span class="color-alpha-unit">%</span>
+                </span>
+              </label>
+            </div>
+            <p class="config-description">设置不同等级对应的标签背景颜色和透明度。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="profileHoverSignatureTitle">
+            <label class="quick-page-option">
+              <span id="profileHoverSignatureTitle">头像悬停显示用户主页</span>
+              <span class="switch switch-small">
+                <input id="profileHoverSignatureEnabled" name="profileHoverSignatureEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">悬停帖子列表中的用户头像时预览用户资料、主题和评论入口及个人介绍。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="cacheTimeTitle">
+            <h3 id="cacheTimeTitle">数据缓存</h3>
+            <label>
+              <input id="userCacheHours" name="userCacheHours" type="number" min="12" step="1" value="24" required>
+            </label>
+            <p class="config-description">用户数据缓存时间（小时），减少重复请求，超过缓存时间重新拉取，最小 12 小时。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="retentionTitle">
+            <h3 id="retentionTitle">数据保留</h3>
+            <label>
+              <select id="profileRetentionDays" name="profileRetentionDays">
+                <option value="0">永久</option>
+                <option value="30">1 个月</option>
+                <option value="90">3 个月</option>
+                <option value="180">6 个月</option>
+                <option value="270">9 个月</option>
+                <option value="360">12 个月</option>
+              </select>
+            </label>
+            <p class="config-description">用户资料存储时长，默认长期保存在本机</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="clearDataTitle">
+            <h3 id="clearDataTitle">清空本地数据</h3>
+            <button id="clearProfileCache" class="secondary-action" type="button">立即清空</button>
+            <p class="config-description">立即清空本机保存的用户资料、历史统计、Readme、抽奖通知和访问足迹。下次加载页面时会重新获取数据。</p>
+          </section>
+
+          <div class="actions">
+            <button type="button" id="reset">恢复默认</button>
+            <span class="config-description">设置调整后自动保存，成功时会提示。</span>
+          </div>
+        </section>
+
+        <section id="block-filter-panel" class="options-panel" hidden>
+          <div class="panel-heading">
+            <h2>内容管理</h2>
+            <label class="switch">
+              <input id="blockFilterEnabled" name="blockFilterEnabled" class="switch-input" type="checkbox" aria-label="启用内容屏蔽">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <section class="config-group" aria-labelledby="blockFilterQuickTitle">
+            <h3 id="blockFilterQuickTitle">快捷管理</h3>
+            <div class="quick-block-grid">
+              <label class="quick-block-option">
+                <span>关键词</span>
+                <span class="switch switch-small">
+                  <input id="blockFilterQuickKeywordEnabled" name="blockFilterQuickKeywordEnabled" class="switch-input" type="checkbox">
+                  <span class="switch-track" aria-hidden="true"></span>
+                </span>
+              </label>
+              <label class="quick-block-option">
+                <span>用户</span>
+                <span class="switch switch-small">
+                  <input id="blockFilterQuickUserEnabled" name="blockFilterQuickUserEnabled" class="switch-input" type="checkbox">
+                  <span class="switch-track" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+            <p class="config-description">开启后，选中对应类型的文字或用户名时显示标记和屏蔽按钮，默认开启。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="followRulesTitle">
+            <h3 id="followRulesTitle">标记规则</h3>
+            <div class="follow-rule-section" aria-labelledby="followKeywordRulesTitle">
+              <div class="follow-rule-section-heading">
+                <h4 id="followKeywordRulesTitle">关键词</h4>
+                <button id="addFollowKeywordGroup" type="button">新建组</button>
+              </div>
+              <div id="followKeywordGroups" class="follow-rule-list"></div>
+            </div>
+            <div class="follow-rule-section" aria-labelledby="followUserRulesTitle">
+              <div class="follow-rule-section-heading">
+                <h4 id="followUserRulesTitle">用户</h4>
+                <button id="addFollowUserGroup" type="button">新建组</button>
+              </div>
+              <div id="followUserGroups" class="follow-rule-list"></div>
+            </div>
+            <p class="config-description">关键词组之间任一组命中即可；组内可选任一或全部关键词，并可添加排除词（任一排除词命中时此组不触发）。每个关键词只能属于一个关键词组，同一用户可以属于多个用户组。同类型多个组命中时，样式按页面顺序优先；所有勾选“显示组名”的命中组都会展示。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="blockFilterTitle">
+            <h3 id="blockFilterTitle">屏蔽规则</h3>
+            <div class="follow-rule-list">
+              <article class="follow-rule-row">
+                <div class="follow-rule-row-summary">
+                  <strong class="follow-rule-row-name">关键词</strong>
+                  <span id="blockedKeywordCount" class="follow-rule-row-count">0 个关键词</span>
+                </div>
+                <div class="follow-rule-row-actions">
+                  <button id="editBlockedKeywords" type="button">编辑</button>
+                </div>
+              </article>
+              <article class="follow-rule-row">
+                <div class="follow-rule-row-summary">
+                  <strong class="follow-rule-row-name">用户</strong>
+                  <span id="blockedUserCount" class="follow-rule-row-count">0 个用户</span>
+                </div>
+                <div class="follow-rule-row-actions">
+                  <button id="editBlockedUsers" type="button">编辑</button>
+                </div>
+              </article>
+            </div>
+            <textarea id="blockedKeywords" name="blockedKeywords" hidden></textarea>
+            <textarea id="blockedUsers" name="blockedUsers" hidden></textarea>
+            <p class="config-description">首页按标题或用户隐藏帖子；详情页标题命中时隐藏整页，楼层正文或用户命中时只隐藏该楼层。</p>
+          </section>
+        </section>
+
+        <section id="image-panel" class="options-panel" hidden>
+          <div class="panel-heading">
+            <h2>图床配置</h2>
+            <label class="switch">
+              <input id="imageUploadEnabled" name="imageUploadEnabled" class="switch-input" type="checkbox" aria-label="启用图床配置">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <section class="config-group" aria-labelledby="imageApiKeyTitle">
+            <h3 id="imageApiKeyTitle">NodeImage API Key</h3>
+            <label aria-label="NodeImage API Key">
+              <span class="password-field">
+                <input id="apiKey" name="apiKey" type="password" autocomplete="off" spellcheck="false">
+                <button id="toggleApiKey" class="icon-button" type="button" aria-label="显示 API Key" title="显示 API Key">
+                  <svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                  <svg class="eye-off-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+                    <path d="M3 3l18 18"></path>
+                    <path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"></path>
+                    <path d="M9.9 5.2A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17.2 17.2 0 0 1-3.1 4.1"></path>
+                    <path d="M6.1 6.9A17 17 0 0 0 2 12s3.5 7 10 7a10.9 10.9 0 0 0 4-.7"></path>
+                  </svg>
+                </button>
+              </span>
+            </label>
+            <p class="config-description">
+              从 <a href="https://nodeimage.com" target="_blank" rel="noopener noreferrer">NodeImage</a> 获取 API 密钥粘贴在此处，密钥只保存在本地，不会共享给任何第三方。<br>
+              配置图床后可拖拽图片到编辑框内，或直接粘贴图片。
+            </p>
+          </section>
+        </section>
+
+        <section id="auto-page-panel" class="options-panel" hidden>
+          <div class="panel-heading">
+            <h2>阅读导航</h2>
+            <label class="switch">
+              <input id="readingNavigationEnabled" name="readingNavigationEnabled" class="switch-input" type="checkbox" aria-label="启用阅读导航">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <section class="config-group" aria-labelledby="attendanceReminderTitle">
+            <label class="quick-page-option">
+              <span id="attendanceReminderTitle">签到提醒</span>
+              <span class="switch switch-small">
+                <input id="attendanceReminderEnabled" name="attendanceReminderEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">开启后，在帖子列表和详情页的签到图标右上角显示今日签到状态。</p>
+            <label class="quick-page-option">
+              <span>每日自动签到</span>
+              <span class="switch switch-small">
+                <input id="autoAttendanceEnabled" name="autoAttendanceEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label>
+              <span>签到方式</span>
+              <select id="autoAttendanceMode" name="autoAttendanceMode">
+                <option value="random">拼手气（随机鸡腿）</option>
+                <option value="fixed">固定 5 个鸡腿</option>
+              </select>
+            </label>
+            <p class="config-description">开启后，保持 Chrome 运行并登录 NodeSeek。插件会在 UTC+8 每日零点尝试签到；必要时短暂打开后台标签完成签到，成功后自动关闭；失败后每 5 分钟重试。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="linkPurifierTitle">
+            <label class="quick-page-option">
+              <span id="linkPurifierTitle">链接净化</span>
+              <span class="switch switch-small">
+                <input id="linkPurifierEnabled" name="linkPurifierEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <div class="telegram-actions">
+              <button id="grantShortLinkPermissions" type="button">授权解析常见短链</button>
+              <span id="shortLinkPermissionStatus" class="config-description">未授权时仍会绕过 NodeSeek 确认页并清理跟踪参数。</span>
+            </div>
+            <p class="config-description">绕过 NodeSeek /jump 确认页，移除常见跟踪参数。解析 bit.ly、t.co 等短链需要单独授权对应域名；授权后仅用于读取跳转地址。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="imagePreviewTitle">
+            <label class="quick-page-option">
+              <span id="imagePreviewTitle">帖子图片预览</span>
+              <span class="switch switch-small">
+                <input id="imagePreviewEnabled" name="imagePreviewEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">点击帖子或评论中的图片后，在灯箱中缩放和切换图片。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="messageEntryTitle">
+            <label class="quick-page-option">
+              <span id="messageEntryTitle">消息入口</span>
+              <span class="switch switch-small">
+                <input id="messageEntryEnabled" name="messageEntryEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">开启后，将用户统计里的通知入口改为 @提及，并添加回复和私信快捷入口。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="editorToolsTitle">
+            <label class="quick-page-option">
+              <span id="editorToolsTitle">Markdown 编辑工具</span>
+              <span class="switch switch-small">
+                <input id="editorToolsEnabled" name="editorToolsEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">在帖子和评论编辑器添加格式按钮，可插入引用、代码、不同类型的 Callout、NodeSeek Tabs 和 Mermaid 模板。</p>
+          </section>
+
+          <section id="telegramConfigGroup" class="config-group" aria-labelledby="telegramMessageTitle">
+            <h3 id="telegramMessageTitle">Telegram 通知</h3>
+            <label><span>Bot Token</span><input id="telegramBotToken" type="password" autocomplete="off" spellcheck="false"></label>
+            <p class="config-description">先通过 @BotFather 创建机器人并填写 Token，再按目标类型填写对应信息。</p>
+
+            <h4>推送目标</h4>
+            <div class="telegram-target-form">
+              <label><span>目标类型</span>
+                <select id="telegramTargetType">
+                  <option value="personal">个人聊天</option>
+                  <option value="direct">频道 Direct</option>
+                </select>
+              </label>
+              <label><span>本地备注名称（选填）</span><input id="telegramTargetName" type="text" maxlength="40" placeholder="例如：个人通知、NodeSeek Direct"></label>
+              <div id="telegramPersonalBotStart" class="telegram-actions telegram-target-help">
+                <button id="openTelegramBot" type="button">打开机器人并开始监听</button>
+                <span class="config-description">点 Start 后自动填入 Chat ID；监听最长 5 分钟。</span>
+              </div>
+              <label><span id="telegramTargetChatIdLabel">个人 Chat ID</span><input id="telegramTargetChatId" type="text" autocomplete="off" spellcheck="false"></label>
+              <div id="telegramDirectTopicPickerField" class="telegram-direct-picker-field" hidden>
+                <span>选择通知接收对话</span>
+                <button id="telegramDirectTopicPickerButton" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span id="telegramDirectTopicPickerLabel">读取可用接收对话</span><span aria-hidden="true">⌄</span>
+                </button>
+                <div id="telegramDirectTopicMenu" class="telegram-direct-topic-menu" role="listbox" aria-label="通知接收对话" hidden></div>
+              </div>
+              <p id="telegramPersonalTargetHelp" class="config-description telegram-target-help">个人聊天：点上方按钮后每 3 秒读取一次，最长监听 5 分钟；在 Telegram 中点 Start，收到后自动填入 Chat ID。</p>
+              <div id="telegramDirectTargetHelp" class="config-description telegram-target-help telegram-direct-instructions" hidden>
+                <ol>
+                  <li>在目标频道设置里把 Bot 设为管理员，授予“管理 Direct Messages”。</li>
+                  <li>填写频道公开分享链接（如 https://t.me/channel）。</li>
+                  <li>使用频道创建者以外的 Telegram 账号打开频道分享链接，并向频道 Direct 发一条消息；然后在下拉列表中选择该账号作为通知接收者。Telegram 限制频道创建者主动发起对话。</li>
+                  <li>点击“添加目标”。</li>
+                </ol>
+              </div>
+              <div class="telegram-target-actions">
+                <span id="telegramTargetActionHint" class="config-description">读取个人 Chat ID 后，将目标添加到下方列表。</span>
+                <div class="telegram-target-action-buttons">
+                  <button id="addTelegramTarget" type="button">添加目标</button>
+                </div>
+              </div>
+            </div>
+            <h4 id="telegramTargetListTitle" class="telegram-target-list-title">已添加目标</h4>
+            <ul id="telegramTargetList" class="telegram-target-list" aria-label="Telegram 推送目标"></ul>
+
+            <label class="quick-page-option">
+              <span>私信通知（包含发送者和正文）</span>
+              <span class="switch switch-small">
+                <input id="telegramMessageNotificationsEnabled" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label class="quick-page-option">
+              <span>新帖关键词通知（RSS）</span>
+              <span class="switch switch-small">
+                <input id="telegramPostNotificationsEnabled" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <div class="telegram-actions">
+              <button id="toggleTelegramPause" type="button">暂停监控</button>
+              <span id="telegramMonitorStatus" class="config-description">状态：未启用</span>
+            </div>
+            <div class="telegram-keyword-section">
+              <div class="telegram-keyword-heading">
+                <h4>关键词监控</h4>
+                <span class="config-description">组与组之间是“或”；组内可选“任一”或“全部”命中，并可设置排除词。</span>
+              </div>
+              <div class="telegram-keyword-form">
+                <input id="telegramKeywordInput" type="text" maxlength="120" placeholder="添加关键词或组合，例如：v.ps, gen2">
+                <select id="telegramKeywordMode" aria-label="关键词匹配方式">
+                  <option value="all">全部关键词命中</option>
+                  <option value="any">任一关键词命中</option>
+                </select>
+                <button id="addTelegramKeyword" type="button">添加</button>
+              </div>
+              <label class="telegram-keyword-exclude-field">
+                <span>本条规则排除词（可选，任一命中即跳过）</span>
+                <input id="telegramKeywordExcludeInput" type="text" maxlength="300" placeholder="多个词用逗号分隔，例如：已出, 求购">
+              </label>
+              <ul id="telegramKeywordRuleList" class="telegram-keyword-rule-list" aria-label="关键词监控规则"></ul>
+            </div>
+            <label><span>全局屏蔽词（任一命中时跳过所有规则，每行一个）</span>
+              <textarea id="telegramBlockedKeywords" rows="3" placeholder="已出\n求购"></textarea>
+            </label>
+            <div class="telegram-board-section">
+              <div class="telegram-board-heading">
+                <h4>监控版块</h4>
+                <div class="telegram-actions">
+                  <button id="selectAllTelegramBoards" type="button">全选</button>
+                </div>
+              </div>
+              <div id="telegramBoardSlugs" class="telegram-board-grid" role="group" aria-label="监控版块">
+                <label><input type="checkbox" value="daily" data-telegram-board>日常</label>
+                <label><input type="checkbox" value="tech" data-telegram-board>技术</label>
+                <label><input type="checkbox" value="info" data-telegram-board>情报</label>
+                <label><input type="checkbox" value="review" data-telegram-board>测评</label>
+                <label><input type="checkbox" value="trade" data-telegram-board>交易</label>
+                <label><input type="checkbox" value="carpool" data-telegram-board>拼车</label>
+                <label><input type="checkbox" value="promo" data-telegram-board>推广</label>
+                <label><input type="checkbox" value="life" data-telegram-board>生活</label>
+                <label><input type="checkbox" value="dev" data-telegram-board>Dev</label>
+                <label><input type="checkbox" value="photo-share" data-telegram-board>贴图</label>
+                <label><input type="checkbox" value="expose" data-telegram-board>曝光</label>
+                <label><input type="checkbox" value="inner" data-telegram-board>内版</label>
+                <label><input type="checkbox" value="sandbox" data-telegram-board>沙盒</label>
+              </div>
+              <p class="config-description">默认全选；取消勾选后按所选版块过滤。未选版块时按全部版块处理。</p>
+            </div>
+            <div class="telegram-actions">
+              <button id="testTelegramConfig" type="button">发送测试通知</button>
+              <span class="config-description">配置调整后自动保存，成功时会提示。</span>
+            </div>
+            <h4>最近推送</h4>
+            <ul id="telegramRssHistory" class="telegram-target-list" aria-label="最近 Telegram 推送"></ul>
+            <p class="config-description">新帖通过 NodeSeek RSS 监控，不依赖打开板块页面；浏览器需保持运行。首次启用只记录 RSS 当前进度，不补发旧帖。私信通过登录态消息列表检查，只转发启用后的新私信。Token、目标和规则只保存在本机，不会随配置备份导出；发送到频道 Direct 后，该主题的成员都可能看到私信正文。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="postSwitcherTitle">
+            <h3 id="postSwitcherTitle">快捷换帖</h3>
+            <label class="quick-page-option">
+              <span>切换帖子</span>
+              <span class="switch switch-small">
+                <input id="postSwitcherEnabled" name="postSwitcherEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">从列表进入详情页后，在页面左右显示按钮，用于切换到上、下一个帖子。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="autoPageTitle">
+            <h3 id="autoPageTitle">自动翻页</h3>
+            <label class="quick-page-option">
+              <span>自动翻页</span>
+              <span class="switch switch-small">
+                <input id="autoPageEnabled" name="autoPageEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label class="quick-page-option">
+              <span>瀑布流阅读</span>
+              <span class="switch switch-small">
+                <input id="autoPageAppendEnabled" name="autoPageAppendEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label id="autoPageDelayOption" class="auto-page-delay-option">
+              <span>翻页延迟（毫秒）</span>
+              <input id="autoPageDelayMs" name="autoPageDelayMs" type="number" min="0" step="1" value="100" required>
+            </label>
+            <p class="config-description">页面到达顶部或底部并停留指定时间后翻页；开启瀑布流时等待后追加下一页，关闭时导航到下一页。正在编辑回复或存在未提交回复草稿时暂停翻页。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="readingShortcutTitle">
+            <h3 id="readingShortcutTitle">快捷键</h3>
+            <div class="shortcut-grid">
+              <label>
+                <span>上一页</span>
+                <input id="postPagePreviousShortcut" name="postPagePreviousShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
+              </label>
+              <label>
+                <span>下一页</span>
+                <input id="postPageNextShortcut" name="postPageNextShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
+              </label>
+              <label>
+                <span>前一个帖子</span>
+                <input id="postSwitcherPreviousShortcut" name="postSwitcherPreviousShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
+              </label>
+              <label>
+                <span>后一个帖子</span>
+                <input id="postSwitcherNextShortcut" name="postSwitcherNextShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
+              </label>
+              <label>
+                <span>快捷评论</span>
+                <input id="quickReplyShortcut" name="quickReplyShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
+              </label>
+              <label>
+                <span>快捷短语</span>
+                <input id="quickPhraseShortcut" name="quickPhraseShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
+              </label>
+            </div>
+            <p class="config-description">点击输入框后按下组合键，按 Backspace 或 Delete 清空。上一页/下一页适用于首页帖子列表和帖子详情页；前一个帖子/后一个帖子仅在从列表进入的帖子详情页生效；快捷评论和快捷短语仅在帖子详情页生效。快捷键分别受对应功能开关控制，且仅在非输入状态下触发。发帖和评论编辑器支持 Mac 的 ⌘+Enter；其他平台使用 Ctrl+Enter，按下后会立即提交当前编辑器内容。</p>
+          </section>
+        </section>
+
+        <section id="telegram-panel" class="options-panel" hidden>
+          <div class="panel-heading telegram-panel-heading">
+            <div><h2>Telegram 监控</h2><p>RSS 新帖关键词与 NodeSeek 私信通知</p></div>
+          </div>
+        </section>
+
+        <section id="quick-phrase-panel" class="options-panel" hidden>
+          <div class="panel-heading">
+            <h2>快捷短语</h2>
+            <label class="switch">
+              <input id="quickPhrasesEnabled" name="quickPhrasesEnabled" class="switch-input" type="checkbox" aria-label="启用快捷短语">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <section class="config-group" aria-labelledby="quickPhraseTitle">
+            <div class="quick-phrase-heading">
+              <h3 id="quickPhraseTitle">短语列表</h3>
+              <button id="addQuickPhrase" class="secondary-action" type="button">新增短语</button>
+            </div>
+
+            <div id="quickPhraseEditor" class="quick-phrase-editor" hidden>
+              <label>
+                <span>短语内容</span>
+                <textarea id="quickPhraseInput" name="quickPhraseInput" rows="6" placeholder="输入要插入的短语，可多行" spellcheck="false"></textarea>
+              </label>
+              <div class="quick-phrase-editor-actions">
+                <button id="cancelQuickPhrase" type="button">取消</button>
+                <button id="confirmQuickPhrase" type="button">添加</button>
+              </div>
+            </div>
+
+            <div id="quickPhraseList" class="quick-phrase-list" aria-live="polite"></div>
+            <p class="config-description">开启后，帖子编辑器工具栏后方会显示快捷短语按钮，点击短语会插入完整内容。新增、编辑或删除短语后会自动保存。</p>
+          </section>
+        </section>
+
+        <section id="lucky-panel" class="options-panel" hidden>
+          <div class="panel-heading">
+            <h2>抽奖通知</h2>
+            <label class="switch">
+              <input id="luckyNotificationsEnabled" name="luckyNotificationsEnabled" class="switch-input" type="checkbox" aria-label="启用抽奖通知">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <section class="config-group" aria-labelledby="luckyAutoAddTitle">
+            <label class="lucky-auto-add-option">
+              <span id="luckyAutoAddTitle">自动添加</span>
+              <span class="switch switch-small">
+                <input id="luckyAutoAddEnabled" name="luckyAutoAddEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">开启后，在有抽奖链接的帖子页点击“发布评论”时自动加入通知列表。</p>
+          </section>
+
+          <div class="lucky-toolbar">
+            <label class="lucky-title-filter">
+              <span>标题</span>
+              <input id="luckyTitleSearch" name="luckyTitleSearch" type="search" placeholder="输入标题关键词">
+            </label>
+            <label class="lucky-status-filter">
+              <span>开奖状态</span>
+              <select id="luckyStatusFilter" name="luckyStatusFilter">
+                <option value="all">全部</option>
+                <option value="pending">未开奖</option>
+                <option value="notified">已开奖</option>
+              </select>
+            </label>
+            <label class="lucky-draw-date-filter">
+              <span>开奖时间起</span>
+              <input id="luckyDrawFrom" name="luckyDrawFrom" type="date">
+            </label>
+            <label class="lucky-draw-date-filter">
+              <span>开奖时间止</span>
+              <input id="luckyDrawTo" name="luckyDrawTo" type="date">
+            </label>
+          </div>
+
+          <div class="list-controls" data-list-controls="lucky" data-list-controls-placement="top"></div>
+          <div id="luckyNotifications" class="lucky-list" aria-live="polite"></div>
+          <div class="list-controls" data-list-controls="lucky" data-list-controls-placement="bottom"></div>
+        </section>
+
+        <section id="visit-history-panel" class="options-panel" hidden>
+          <div class="panel-heading">
+            <h2>访问足迹</h2>
+          </div>
+
+          <div class="visit-history-toolbar">
+            <div class="visit-history-filter-grid">
+              <label class="visit-history-title-filter">
+                <span>标题</span>
+                <input id="visitHistoryTitleSearch" name="visitHistoryTitleSearch" type="search" placeholder="输入标题关键词">
+              </label>
+              <label class="visit-history-author-filter">
+                <span>发帖人</span>
+                <input id="visitHistoryAuthorSearch" name="visitHistoryAuthorSearch" type="search" placeholder="输入发帖人">
+              </label>
+              <label class="visit-history-date-filter">
+                <span>发帖时间起</span>
+                <input id="visitHistoryPostedFrom" name="visitHistoryPostedFrom" type="date">
+              </label>
+              <label class="visit-history-date-filter">
+                <span>发帖时间止</span>
+                <input id="visitHistoryPostedTo" name="visitHistoryPostedTo" type="date">
+              </label>
+            </div>
+          </div>
+
+          <div class="list-controls" data-list-controls="visitHistory" data-list-controls-placement="top"></div>
+          <div id="visitHistory" class="visit-history-list" aria-live="polite"></div>
+          <div class="list-controls" data-list-controls="visitHistory" data-list-controls-placement="bottom"></div>
+        </section>
+
+        <section id="sync-panel" class="options-panel" hidden>
+          <div class="panel-heading">
+            <h2>同步备份</h2>
+          </div>
+
+          <section class="config-group" aria-labelledby="syncConfigTitle">
+            <h3 id="syncConfigTitle">同步配置</h3>
+            <div class="sync-action-grid">
+              <button id="exportConfig" class="sync-action-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 21V9"></path>
+                  <path d="m7 14 5-5 5 5"></path>
+                  <path d="M5 3h14"></path>
+                </svg>
+                <span>导出配置</span>
+              </button>
+              <button id="importConfig" class="sync-action-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v12"></path>
+                  <path d="m7 10 5 5 5-5"></path>
+                  <path d="M5 21h14"></path>
+                </svg>
+                <span>导入配置</span>
+              </button>
+            </div>
+            <p class="config-description">将扩展设置项（包括 Telegram 通知、目标和 Bot Token）导出为 JSON 文件，或从备份文件恢复；配置文件含敏感凭据，请勿随意共享。</p>
+          </section>
+
+          <section class="config-group" aria-labelledby="syncDataTitle">
+            <h3 id="syncDataTitle">同步数据</h3>
+            <div class="sync-action-grid">
+              <button id="exportData" class="sync-action-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 21V9"></path>
+                  <path d="m7 14 5-5 5 5"></path>
+                  <path d="M5 3h14"></path>
+                </svg>
+                <span>导出数据</span>
+              </button>
+              <button id="importData" class="sync-action-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v12"></path>
+                  <path d="m7 10 5 5 5-5"></path>
+                  <path d="M5 21h14"></path>
+                </svg>
+                <span>导入数据</span>
+              </button>
+            </div>
+            <p class="config-description">导出本机 IndexedDB 数据库；导入时会并合并有效记录，无法识别的数据会跳过。</p>
+          </section>
+
+          <input id="importConfigFile" type="file" accept="application/json,.json" hidden>
+          <input id="importDataFile" type="file" accept="application/json,.json" hidden>
+        </section>
+
+        <section id="about-panel" class="options-panel" hidden>
+          <div class="about-heading">
+            <div>
+              <h2>关于扩展</h2>
+              <p class="about-summary">NodeSeek Helper 是 NodeSeek 非官方 Chrome MV3 扩展，提供用户标签、内容管理、自动传图、签到提醒、阅读导航、快捷评论、快捷短语、抽奖通知、访问足迹和同步备份等实用功能。</p>
+            </div>
+            <img class="about-extension-icon" src="../assets/icon128.png" alt="NodeSeek Helper 图标">
+          </div>
+
+          <section class="about-section" aria-labelledby="privacyStatementTitle">
+            <h3 id="privacyStatementTitle">隐私声明</h3>
+            <ul class="about-statement-list">
+              <li>扩展设置、内容屏蔽与标记规则、快捷短语、用户资料与趋势缓存、Readme 引用、抽奖通知、访问足迹、今日签到记录和阅读导航上下文均保存在浏览器本地；清空本地数据只会删除用户资料、趋势历史、Readme、抽奖通知、访问足迹和今日签到记录，不会删除扩展设置、快捷短语与内容管理规则。</li>
+              <li>扩展不包含遥测、统计或远程追踪逻辑，不会把本地保存的配置、缓存和通知上传给插件作者或无关第三方。</li>
+              <li>同步备份只会在本机生成或读取你选择的 JSON 文件；配置备份会包含已保存的图床 API Key，数据备份会包含本机缓存和历史数据，请自行保管，不要公开分享。</li>
+              <li>请在 NodeSeek 站点规则、第三方服务条款和所在地法律法规允许的范围内使用标签展示、内容管理、图床上传、签到提醒、阅读导航、快捷评论、快捷短语、抽奖通知、访问足迹和同步备份等功能；因违法、违规或滥用产生的后果由使用者自行承担。</li>
+            </ul>
+          </section>
+
+          <section class="about-section" aria-labelledby="dataBoundaryTitle">
+            <h3 id="dataBoundaryTitle">数据边界</h3>
+            <p>浏览 NodeSeek、检查签到状态、刷新用户资料或检测抽奖链接时，仍会访问 NodeSeek 页面和接口；开启图床上传并粘贴图片时，图片会发送到你配置的 NodeImage 接口；导入或导出同步备份文件时，只会读写本机文件。这些请求和文件操作仅在对应功能场景中发生，由对应服务或本机浏览器处理，不会经过插件作者的服务器。</p>
+          </section>
+
+          <dl class="about-meta-list">
+            <div>
+              <dt>插件版本</dt>
+              <dd id="extensionVersion">-</dd>
+            </div>
+            <div>
+              <dt>建议反馈</dt>
+              <dd><a href="https://www.nodeseek.com/notification#/message?mode=talk&to=46734" target="_blank" rel="noopener noreferrer">通过 NodeSeek 私信作者</a></dd>
+            </div>
+          </dl>
+        </section>
+
+      </form>
+    </main>
+
+    <div id="toastRoot" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+
+    <div id="deleteDialog" class="dialog-backdrop" hidden>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="deleteDialogTitle" aria-describedby="deleteDialogMessage">
+        <h2 id="deleteDialogTitle">删除抽奖通知</h2>
+        <p id="deleteDialogMessage"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cancelDelete">取消</button>
+          <button type="button" id="confirmDelete" class="danger-button">删除</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="clearProfileDialog" class="dialog-backdrop" hidden>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="clearProfileDialogTitle" aria-describedby="clearProfileDialogMessage">
+        <h2 id="clearProfileDialogTitle">清空本地数据</h2>
+        <p id="clearProfileDialogMessage">确定清空所有本机保存的用户资料、历史统计、Readme、抽奖通知和访问足迹吗？</p>
+        <div class="dialog-actions">
+          <button type="button" id="cancelClearProfile">取消</button>
+          <button type="button" id="confirmClearProfile" class="danger-button">清空</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="deleteVisitHistoryDialog" class="dialog-backdrop" hidden>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="deleteVisitHistoryDialogTitle" aria-describedby="deleteVisitHistoryDialogMessage">
+        <h2 id="deleteVisitHistoryDialogTitle">删除访问足迹</h2>
+        <p id="deleteVisitHistoryDialogMessage"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cancelDeleteVisitHistory">取消</button>
+          <button type="button" id="confirmDeleteVisitHistory" class="danger-button">删除</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="confirmDialog" class="dialog-backdrop" hidden>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogMessage">
+        <h2 id="confirmDialogTitle"></h2>
+        <p id="confirmDialogMessage"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cancelConfirmDialog">取消</button>
+          <button type="button" id="confirmDialogAction">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="blockRuleDialog" class="dialog-backdrop" hidden>
+      <section class="dialog follow-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="blockRuleDialogTitle">
+        <h2 id="blockRuleDialogTitle"></h2>
+        <div id="blockRuleDialogBody" class="follow-rule-dialog-body"></div>
+        <div class="dialog-actions">
+          <button type="button" id="cancelBlockRuleDialog">取消</button>
+          <button type="button" id="confirmBlockRuleDialog">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="followRuleDialog" class="dialog-backdrop" hidden>
+      <section class="dialog follow-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="followRuleDialogTitle">
+        <h2 id="followRuleDialogTitle"></h2>
+        <div id="followRuleDialogBody" class="follow-rule-dialog-body"></div>
+        <div class="dialog-actions">
+          <button type="button" id="cancelFollowRuleDialog">取消</button>
+          <button type="button" id="confirmFollowRuleDialog">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="followRuleStyleDialog" class="dialog-backdrop" hidden>
+      <section class="dialog follow-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="followRuleStyleDialogTitle">
+        <h2 id="followRuleStyleDialogTitle"></h2>
+        <div id="followRuleStyleDialogBody" class="follow-rule-dialog-body"></div>
+        <div class="dialog-actions">
+          <button type="button" id="cancelFollowRuleStyleDialog">取消</button>
+          <button type="button" id="confirmFollowRuleStyleDialog">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="../src/shortcuts.js"></script>
+    <script src="shared.js"></script>
+    <script src="block-rules.js"></script>
+    <script src="follow-rules.js"></script>
+    <script src="settings.js"></script>
+    <script src="sync.js"></script>
+    <script src="lucky-notifications.js"></script>
+    <script src="visit-history.js"></script>
+    <script src="data-management.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

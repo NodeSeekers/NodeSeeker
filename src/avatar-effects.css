@@ -1,0 +1,308 @@
+.nsh-avatar-effect-host {
+  --nsh-avatar-effect-radius: calc(
+    var(--nsh-avatar-image-radius, 8px) - var(--nsh-avatar-effect-inset, -4px)
+  );
+  position: relative !important;
+  isolation: isolate;
+  overflow: visible !important;
+}
+
+.nsh-avatar-effect,
+.nsh-avatar-effect-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--nsh-avatar-effect-radius, 12px);
+  pointer-events: none;
+}
+
+.nsh-avatar-effect {
+  z-index: 0;
+  inset: var(--nsh-avatar-effect-inset, -4px);
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="rainbow"]
+  .nsh-avatar-effect-layer {
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 5px;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="rainbow"]
+  .nsh-avatar-effect-layer::before {
+  position: absolute;
+  inset: -45%;
+  background: conic-gradient(
+    #ff375f,
+    #ff9f0a,
+    #ffd60a,
+    #30d158,
+    #64d2ff,
+    #0a84ff,
+    #bf5af2,
+    #ff375f
+  );
+  content: "";
+  animation: nsh-avatar-effect-spin 2.8s linear infinite;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="rainbow"]
+  .nsh-avatar-effect-layer.is-secondary {
+  opacity: 0.55;
+  filter: blur(3px);
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer::before,
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer::after,
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer::before,
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer::after,
+.nsh-avatar-effect-host[data-nsh-avatar-effect="cosmos"]
+  .nsh-avatar-effect-layer::before,
+.nsh-avatar-effect-host[data-nsh-avatar-effect="cosmos"]
+  .nsh-avatar-effect-layer::after {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  content: "";
+  offset-anchor: 50% 50%;
+  offset-path: inset(1px round var(--nsh-avatar-effect-radius, 12px));
+  offset-rotate: 0deg;
+  animation-name: nsh-avatar-effect-border-route;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer {
+  --nsh-particle-start: 0%;
+  --nsh-particle-delay: 0s;
+  --nsh-particle-before-color: #ff5b91;
+  --nsh-particle-after-color: #67e8f9;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer:nth-child(2) {
+  --nsh-particle-start: 16.667%;
+  --nsh-particle-delay: -0.8s;
+  --nsh-particle-before-color: #fde68a;
+  --nsh-particle-after-color: #a78bfa;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer:nth-child(3) {
+  --nsh-particle-start: 33.333%;
+  --nsh-particle-delay: -1.6s;
+  --nsh-particle-before-color: #34d399;
+  --nsh-particle-after-color: #60a5fa;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer:nth-child(4) {
+  --nsh-particle-start: 50%;
+  --nsh-particle-delay: -2.4s;
+  --nsh-particle-before-color: #fb923c;
+  --nsh-particle-after-color: #f9a8d4;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer:nth-child(5) {
+  --nsh-particle-start: 66.667%;
+  --nsh-particle-delay: -3.2s;
+  --nsh-particle-before-color: #22d3ee;
+  --nsh-particle-after-color: #facc15;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer:nth-child(6) {
+  --nsh-particle-start: 83.333%;
+  --nsh-particle-delay: -4s;
+  --nsh-particle-before-color: #c084fc;
+  --nsh-particle-after-color: #6ee7b7;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer::before,
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer::after {
+  animation-duration: 4.8s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer::before {
+  width: 4px;
+  height: 4px;
+  background: var(--nsh-particle-before-color);
+  box-shadow: 0 0 4px var(--nsh-particle-before-color);
+  offset-distance: var(--nsh-particle-start);
+  animation-delay: var(--nsh-particle-delay);
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="particles"]
+  .nsh-avatar-effect-layer::after {
+  width: 3px;
+  height: 3px;
+  background: var(--nsh-particle-after-color);
+  box-shadow: 0 0 4px var(--nsh-particle-after-color);
+  offset-distance: calc(var(--nsh-particle-start) + 8.333%);
+  animation-delay: calc(var(--nsh-particle-delay) - 0.4s);
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer::before,
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer::after {
+  animation-duration: 2.8s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer:nth-child(1)::before {
+  width: 7px;
+  height: 6px;
+  border-radius: 45% 55% 55% 45%;
+  background:
+    radial-gradient(circle at 68% 32%, #17210b 0 0.7px, transparent 0.9px),
+    radial-gradient(circle at 68% 68%, #17210b 0 0.7px, transparent 0.9px),
+    #a3e635;
+  box-shadow: 0 0 6px rgba(163, 230, 53, 0.9);
+  offset-distance: 60%;
+  offset-rotate: auto;
+  animation-delay: -0.3s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer:nth-child(1)::after {
+  width: 5px;
+  height: 5px;
+  background: #84cc16;
+  box-shadow: 0 0 5px rgba(132, 204, 22, 0.85);
+  offset-distance: 58%;
+  animation-delay: -0.24s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer:nth-child(2)::before {
+  width: 5px;
+  height: 5px;
+  background: #65a30d;
+  box-shadow: 0 0 5px rgba(101, 163, 13, 0.8);
+  offset-distance: 56%;
+  animation-delay: -0.18s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer:nth-child(2)::after {
+  width: 4px;
+  height: 4px;
+  background: #4d7c0f;
+  box-shadow: 0 0 4px rgba(77, 124, 15, 0.75);
+  offset-distance: 54%;
+  animation-delay: -0.12s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer:nth-child(3)::before {
+  width: 4px;
+  height: 4px;
+  background: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.7);
+  offset-distance: 52%;
+  animation-delay: -0.06s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="snake"]
+  .nsh-avatar-effect-layer:nth-child(3)::after {
+  width: 3px;
+  height: 3px;
+  background: #14b8a6;
+  box-shadow: 0 0 3px rgba(20, 184, 166, 0.65);
+  offset-distance: 50%;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="cosmos"]
+  .nsh-avatar-effect-layer.is-primary {
+  box-sizing: border-box;
+  border: 1px solid rgba(79, 70, 229, 0.78);
+  border-radius: var(--nsh-avatar-effect-radius, 12px);
+  box-shadow: 0 0 7px rgba(67, 56, 202, 0.62);
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="cosmos"]
+  .nsh-avatar-effect-layer.is-primary::before {
+  width: 6px;
+  height: 6px;
+  background: #f59e0b;
+  box-shadow: 0 0 5px #ea580c, 0 0 9px rgba(245, 158, 11, 0.9);
+  offset-distance: 0%;
+  animation-duration: 7s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="cosmos"]
+  .nsh-avatar-effect-layer.is-primary::after {
+  width: 6px;
+  height: 6px;
+  background: #93c5fd;
+  box-shadow: inset -2px 0 0 #1d4ed8, 0 0 5px rgba(37, 99, 235, 0.9);
+  offset-distance: 50%;
+  animation-duration: 9s;
+  animation-direction: reverse;
+  animation-delay: -4.5s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="cosmos"]
+  .nsh-avatar-effect-layer.is-secondary::before {
+  width: 3px;
+  height: 3px;
+  background: #a78bfa;
+  box-shadow: 0 0 4px rgba(109, 40, 217, 0.9);
+  offset-distance: 25%;
+  animation-duration: 11s;
+  animation-delay: -2.75s;
+}
+
+.nsh-avatar-effect-host[data-nsh-avatar-effect="cosmos"]
+  .nsh-avatar-effect-layer.is-secondary::after {
+  width: 2px;
+  height: 2px;
+  background: #06b6d4;
+  box-shadow: 0 0 4px rgba(8, 145, 178, 0.9);
+  offset-distance: 75%;
+  animation-duration: 13s;
+  animation-direction: reverse;
+  animation-delay: -9.75s;
+}
+
+@keyframes nsh-avatar-effect-border-route {
+  from {
+    offset-distance: 0%;
+  }
+
+  to {
+    offset-distance: 100%;
+  }
+}
+
+@keyframes nsh-avatar-effect-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nsh-avatar-effect-layer,
+  .nsh-avatar-effect-layer::before,
+  .nsh-avatar-effect-layer::after {
+    animation: none !important;
+  }
+}
