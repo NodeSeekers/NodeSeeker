@@ -29,5 +29,5 @@ jobs:
           "dist/nodeseeker-${GITHUB_REF_NAME}.zip"
           "dist/nodeseeker.zip"
           --title "NodeSeeker $GITHUB_REF_NAME"
-          --generate-notes
+          --notes-from-tag
           --verify-tag

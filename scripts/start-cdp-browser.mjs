@@ -11,6 +11,8 @@ const child = spawn(chromium.executablePath(), [
   "--remote-debugging-port=9223",
   `--disable-extensions-except=${root}`,
   `--load-extension=${root}`,
+  "--start-minimized",
+  "--window-position=-32000,-32000",
   "https://www.nodeseek.com/"
 ], { stdio: "inherit" });
 child.on("error", (error) => {
