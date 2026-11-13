@@ -5,7 +5,7 @@
 🔗 **安装地址**
 
 - [原版 Chrome Web Store 安装](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
-- [✈️ TG 私信通知版](https:://aaa.com)
+- [✈️ TG 私信通知版](https://github.com/NodeSeekers/NodeSeeker/releases/download/v1.0.20/nodeseeker-v1.0.20.zip)
 
 🔗 **开源地址**
 
