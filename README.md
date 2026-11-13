@@ -1,29 +1,55 @@
-# 🧩 NodeSeeker
+# 🧩 NodeSeeker：开源 NodeSeek 浏览器插件，支持 ✈️ Telegram 私信推送
 
-🙏 特别感谢 **NodeSeek Helper** 原作者的创作与分享。本项目基于原版修改。
+🙏 特别感谢 **NodeSeek Helper** 原作者[zhu0823大佬](https://www.nodeseek.com/post-810553-1)的创作与分享。本项目基于原版修改。
 
-🔗 **原版页面**
+🔗 **安装地址**
 
-- [Chrome Web Store：NodeSeek Helper](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
-- [zhu0823 大佬原版](https://www.nodeseek.com/post-810553-1)
+- [原版 Chrome Web Store 安装](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
+- [✈️ TG 私信通知版](https:://aaa.com)
+
+> [!tip]
+> 安装插件->登录账号
+> 不用打开NS，不用第三方托管，不用服务器部署，数据就在本地
+> 接收重要消息通知
 
 ---
 
 ## 🧰 在原版基础上的增加
 
-| 改动功能 | 说明 |
+| 功能 | 使用场景 |
 |---|---|
-| 📬 提及、回复和私信预览 | 悬停入口查看最近 10 条和未读状态。点击提及或回复后标记已读，跳到对应楼层并高亮 3 秒；点击私信打开对应聊天。每类入口都可“全部已读”。 |
-| 📡 Telegram 私信和新帖通知 | Chrome 运行时每分钟在后台检查，无需打开 NodeSeek 页面。私信监控需要浏览器保持 NodeSeek 登录，只推送别人发来的消息；RSS 新帖通知带版块、命中词和主题链接，并会去重。 |
-| 🎯 Telegram 接收目标 | 个人聊天可监听 `/start` 并自动填入 Chat ID，最长监听 5 分钟。频道 Direct 先由接收小号通过分享链接发一条消息，再读取并选择该对话；频道创建者不能作为接收账号。目标可单独启停，也可暂停监控。 |
-| 🔎 关键词分组规则 | 内容标记和 RSS 监控分别设置规则组；组间按“或”匹配，组内可选任一词或全部词命中，也可设置排除词。RSS 规则支持按版块筛选。 |
-| 👤 用户资料卡片和趋势图 | 设置中可选择头像悬停时显示用户资料卡或 7/30 天趋势图。资料卡包含个人介绍；移到其他头像时显示对应用户，移入资料卡或主题列表时卡片保持显示。点击用户名打开主页；点击主题数或评论数查看最近 10 条，条目在新标签页打开。 |
-| 📊 等级和每日进度 | 悬停右侧个人信息卡片上的等级，查看升级进度、今日发帖和评论数量、免费投喂额度及签到状态。 |
-| 📜 列表和主题自动翻页 | 滚动到底部追加下一页或切换下一页，滚动到顶部切换上一页；瀑布流会同步页码。鼠标指在未聚焦的回复框上也能滚动翻页；聚焦或有草稿时暂停。延迟可设置，默认 100 毫秒。 |
-| ⌨️ 编辑器格式和快捷键 | 工具栏支持 Markdown、Callout、Tabs 和 Mermaid。评论编辑器支持设置快捷回复键，默认 macOS 为 `⌘+Enter`、Windows 为 `Ctrl+Enter`。 |
-| ✅ 每日自动签到 | Chrome 运行且已登录 NodeSeek 时，每天自动签到；可选随机鸡腿或固定 5 个鸡腿，失败后每 5 分钟重试。 |
-| 🖼️ 帖子图片预览 | 点击主题或评论中的图片，在灯箱中放大、缩小和切换；支持鼠标滚轮和左右方向键。 |
-| 📦 配置和本地数据导入导出 | 扩展设置可整体导入和导出，包括功能开关、内容标记规则和 Telegram 配置；本地历史与缓存数据可单独备份和恢复。 |
+| 📬 提及、回复和私信预览 | 有人回复、提及或发私信时，从扩展入口找到未读内容并直接回到原帖或聊天，不必在站内逐个翻找。 |
+| ✈️ Telegram 私信和新帖提醒 | 不想一直守着 NodeSeek 时，把新私信和关注的新帖提醒发到 ✈️ Telegram；只看关心的关键词或版块。私信提醒需要浏览器运行并保持登录。 |
+| 🔎 关注内容高亮 | 浏览帖子列表时，一眼找到提到关注品牌、地区或主题的帖子；进入帖子后也能快速定位相关评论。 |
+| 👤 用户资料卡片和趋势图 | 看帖或看评论时快速了解作者简介、发帖评论概况和近期活跃趋势，判断是否值得继续关注。 |
+| 📊 等级和每日进度 | 不用反复打开个人主页，就能查看升级进度、今日发帖评论、签到状态和免费投喂额度。 |
+| 📜 列表和主题自动翻页 | 连续浏览帖子和评论时自动接上后续内容，减少停下来点页码的次数。 |
+| ⌨️ 编辑器格式和快捷键 | 写帖子或评论时快速整理段落、代码和图表；常用回复可用快捷键发送，少做重复排版。 |
+| ✅ 每日自动签到 | 不必每天记着手动签到；浏览器运行且已登录时自动完成，投喂方式可按习惯选择。 |
+| 🖼️ 帖子图片预览 | 帖子里的截图或图片可直接放大查看、前后切换，回看原帖更顺畅。 |
+| 📦 配置和本地数据导入导出 | 换电脑、重装扩展或迁移浏览器时备份和恢复配置与本地记录，减少重新设置和历史丢失。 |
+
+---
+
+## 🖼️ 截图展示
+
+:::: tabs
+::: tab-item 功能截图
+
+| 设置页面 | 设置页面 | 设置页面 | 设置页面 |
+|---|---|---|---|
+| **🏷️ 标记数据**<br>![标记数据设置](https://cdn.nodeimage.com/i/CqEBn3ihouhehErmEzYNJ5ZQFPSiyAke.png) | **🧭 阅读导航**<br>![阅读导航设置](https://cdn.nodeimage.com/i/Yl2wNhGbiCobc3JesJNJXUfiRqqiA0Vn.png) | **✈️ Telegram 监控**<br>![✈️ Telegram 监控设置](https://cdn.nodeimage.com/i/AnT0FbkOCNQ3qpcsRYNaqL92vGoQZCKk.png) | **🧹 内容管理**<br>![内容管理设置](https://cdn.nodeimage.com/i/xU0UPOtAjJJMUTTHGOlrFXYVXa4zrYrW.png) |
+| **🖼️ 图床配置**<br>![图床设置](https://cdn.nodeimage.com/i/Ihyjh4NjNLOkK72bWuYCVL7zSAfNI0jq.png) | **🎁 抽奖通知**<br>![抽奖通知设置](https://cdn.nodeimage.com/i/4L1PuQp9QN2O84Vk7hp0hXArHkuiEoW9.png) | **👣 访问足迹**<br>![访问足迹设置](https://cdn.nodeimage.com/i/4xZ7jB115NC4qtETabLGEx2rEtd5TAVr.png) |  |
+
+:::
+::: tab-item 效果预览
+
+| 页面效果 | 页面效果 | 页面效果 | 页面效果 |
+|---|---|---|---|
+| **📊 等级和每日进度**<br>![等级和每日进度](https://cdn.nodeimage.com/i/OunbvOYznfpQbMHErUXMcPb0lZRNd2Kk.png) | **🔎 关键词标记**<br>![关键词标记](https://cdn.nodeimage.com/i/DMP1aC9d88sGVN63PljzJ6qXbfbQj50l.png) | **📬 私信预览**<br>![私信预览](https://cdn.nodeimage.com/i/KwXqqbm9uO0X3vsqvmvA0kdjgkhmNnLY.png) | **📬 提及与回复预览**<br>![提及与回复预览](https://cdn.nodeimage.com/i/S7qLV2RzBMwpVYLPohMPolu5YGEtk9Hs.png) |
+
+:::
+::::
 
 ---
 
@@ -36,6 +62,6 @@
 
 ## 🔐 配置与隐私
 
-扩展设置保存在本机浏览器。配置导出文件可能包含 NodeImage API Key、Telegram Bot Token 和接收目标，请勿公开分享。启用 Telegram 通知后，符合规则的私信或新帖信息会发送到你配置的 Telegram 目标。
+扩展设置保存在本机浏览器。配置导出文件可能包含 NodeImage API Key、✈️ Telegram Bot Token 和接收目标，请勿公开分享。启用 ✈️ Telegram 通知后，符合规则的私信或新帖信息会发送到你配置的 ✈️ Telegram 目标。
 
 🙏 再次感谢 **NodeSeek Helper** zhu0823大佬分享原始作品。

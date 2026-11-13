@@ -5,6 +5,10 @@ let telegramDirectNextOffset = null;
 let selectedTelegramDirectTopic = null;
 let telegramPersonalStartPollTimer = null;
 let telegramPersonalStartWatchUntil = 0;
+let telegramValidatedToken = "";
+let telegramTokenValidationState = "empty";
+let telegramTokenValidationTimer = 0;
+let telegramTokenValidationRequestId = 0;
 let telegramKeywordRules = [];
 let telegramKeywordEditingRuleId = "";
 let selectedTelegramHistoryKeys = new Set();
@@ -146,10 +150,9 @@ async function restoreTelegramConfig() {
     telegramMonitorLastError: "",
     telegramPersonalStartWatchUntil: 0,
     telegramPendingPersonalChatId: "",
-    telegramRssHistory: []
+    telegramRssHistory: [],
+    telegramNotificationDefaultsMigrationV1: false
   });
-  document.querySelector("#telegramMessageNotificationsEnabled").checked = config.telegramMessageNotificationsEnabled;
-  document.querySelector("#telegramPostNotificationsEnabled").checked = config.telegramPostNotificationsEnabled;
   document.querySelector("#telegramBotToken").value = config.telegramBotToken;
   telegramTargets = normalizeTelegramTargets(config.telegramTargets);
   if (telegramTargets.length === 0 && config.telegramChatId) {
@@ -164,6 +167,21 @@ async function restoreTelegramConfig() {
     await chrome.storage.local.set({ telegramTargets });
     await chrome.storage.local.remove("telegramChatId");
   }
+  const hasEnabledTarget = telegramTargets.some((target) => target.enabled !== false && target.chatId);
+  if (!config.telegramNotificationDefaultsMigrationV1 && hasEnabledTarget) {
+    if (config.telegramMessageNotificationsEnabled === false
+        && config.telegramPostNotificationsEnabled === false) {
+      config.telegramMessageNotificationsEnabled = true;
+      config.telegramPostNotificationsEnabled = true;
+      await chrome.storage.local.set({
+        telegramMessageNotificationsEnabled: true,
+        telegramPostNotificationsEnabled: true
+      });
+    }
+    await chrome.storage.local.set({ telegramNotificationDefaultsMigrationV1: true });
+  }
+  document.querySelector("#telegramMessageNotificationsEnabled").checked = config.telegramMessageNotificationsEnabled;
+  document.querySelector("#telegramPostNotificationsEnabled").checked = config.telegramPostNotificationsEnabled;
   telegramKeywordRules = normalizeTelegramKeywordRules(config.telegramKeywordRules);
   renderTelegramKeywordRules();
   document.querySelector("#telegramBlockedKeywords").value = config.telegramBlockedKeywords.join("\n");
@@ -178,11 +196,20 @@ async function restoreTelegramConfig() {
   renderTelegramMonitorStatus(config);
   renderTelegramHistory(config.telegramRssHistory);
   syncTelegramTargetFields();
-  syncTelegramSetupVisibility();
-  if (config.telegramPendingPersonalChatId) {
+  const savedToken = String(config.telegramBotToken || "").trim();
+  if (savedToken) {
+    await verifyTelegramToken(savedToken);
+  } else {
+    telegramTokenValidationState = "empty";
+    setTelegramTokenStatus("");
+    syncTelegramSetupVisibility();
+  }
+  if (telegramTokenValidationState === "valid" && config.telegramPendingPersonalChatId) {
     await ensureTelegramPersonalTarget(config.telegramPendingPersonalChatId, config.telegramPendingPersonalTargetName);
   }
-  syncTelegramPersonalStartPolling(config.telegramPersonalStartWatchUntil);
+  syncTelegramPersonalStartPolling(
+    telegramTokenValidationState === "valid" ? config.telegramPersonalStartWatchUntil : 0
+  );
 }
 
 function syncTelegramPersonalStartPolling(watchUntilValue) {
@@ -279,30 +306,115 @@ document.querySelector("#selectAllTelegramBoards").addEventListener("click", () 
 let telegramConfigSaveTimer = 0;
 
 function handleTelegramBotTokenInput() {
+  window.clearTimeout(telegramTokenValidationTimer);
+  telegramTokenValidationRequestId += 1;
+  telegramValidatedToken = "";
+  const token = document.querySelector("#telegramBotToken").value.trim();
+  if (!token) {
+    telegramTokenValidationState = "empty";
+    setTelegramTokenStatus("");
+    syncTelegramSetupVisibility();
+    scheduleTelegramConfigSave({ silent: true });
+    return;
+  }
+
+  telegramTokenValidationState = "checking";
+  setTelegramTokenStatus("输入完成后自动验证…", "checking");
   syncTelegramSetupVisibility();
-  scheduleTelegramConfigSave({ allowIncompleteConfig: true, silent: true });
+  telegramTokenValidationTimer = window.setTimeout(() => {
+    telegramTokenValidationTimer = 0;
+    verifyTelegramToken(token, { persist: true });
+  }, 650);
 }
 
-function scheduleTelegramConfigSave({ allowIncompleteConfig = false, silent = false } = {}) {
+async function verifyTelegramToken(tokenValue, { persist = false } = {}) {
+  const token = String(tokenValue || "").trim();
+  if (!token) {
+    telegramValidatedToken = "";
+    telegramTokenValidationState = "empty";
+    setTelegramTokenStatus("");
+    syncTelegramSetupVisibility();
+    return false;
+  }
+
+  const requestId = ++telegramTokenValidationRequestId;
+  telegramTokenValidationState = "checking";
+  setTelegramTokenStatus("正在验证 Bot Token…", "checking");
+  syncTelegramSetupVisibility();
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "telegram:validateToken",
+      payload: { token }
+    });
+    if (requestId !== telegramTokenValidationRequestId
+        || document.querySelector("#telegramBotToken").value.trim() !== token) {
+      return false;
+    }
+    if (!response?.ok || !response.result?.username) {
+      const error = new Error(response?.error || "Telegram 未返回机器人用户名");
+      error.invalidToken = response?.invalidToken === true;
+      throw error;
+    }
+
+    telegramValidatedToken = token;
+    telegramTokenValidationState = "valid";
+    setTelegramTokenStatus(`Token 有效：@${response.result.username}`, "valid");
+    syncTelegramSetupVisibility();
+
+    if (persist) {
+      const saved = await saveTelegramConfig({ silent: true });
+      if (!saved && requestId === telegramTokenValidationRequestId) {
+        telegramValidatedToken = "";
+        telegramTokenValidationState = "error";
+        setTelegramTokenStatus("Token 已验证，但配置保存失败，请重试。", "error");
+        syncTelegramSetupVisibility();
+        return false;
+      }
+    }
+    return true;
+  } catch (error) {
+    if (requestId !== telegramTokenValidationRequestId) return false;
+
+    telegramValidatedToken = "";
+    telegramTokenValidationState = error.invalidToken ? "invalid" : "error";
+    setTelegramTokenStatus(
+      error.invalidToken
+        ? "Token 无效，请检查后重新输入。"
+        : `暂时无法验证 Token：${error.message || "请检查网络后重试"}`,
+      telegramTokenValidationState
+    );
+    syncTelegramSetupVisibility();
+
+    if (error.invalidToken) {
+      const saved = await chrome.storage.local.get({ telegramBotToken: "" });
+      if (requestId === telegramTokenValidationRequestId
+          && String(saved.telegramBotToken || "").trim() === token) {
+        await chrome.storage.local.set({ telegramBotToken: "" });
+      }
+    }
+    return false;
+  }
+}
+
+function scheduleTelegramConfigSave({ silent = false } = {}) {
   window.clearTimeout(telegramConfigSaveTimer);
   telegramConfigSaveTimer = window.setTimeout(() => {
     telegramConfigSaveTimer = 0;
-    saveTelegramConfig({ allowIncompleteConfig, silent });
+    saveTelegramConfig({ silent });
   }, 450);
 }
 
-async function saveTelegramConfig({ allowIncompleteConfig = false, silent = false } = {}) {
+async function saveTelegramConfig({ silent = false } = {}) {
   window.clearTimeout(telegramConfigSaveTimer);
   telegramConfigSaveTimer = 0;
   const enabled = document.querySelector("#telegramMessageNotificationsEnabled").checked;
   const postsEnabled = document.querySelector("#telegramPostNotificationsEnabled").checked;
   const token = document.querySelector("#telegramBotToken").value.trim();
-  const enabledTargets = telegramTargets.filter((target) => target.enabled !== false && target.chatId);
-  if (!allowIncompleteConfig && (enabled || postsEnabled) && (!token || enabledTargets.length === 0)) {
-    showToast("启用通知前请填写 Bot Token 并添加推送目标", "error");
+  if (token && (telegramTokenValidationState !== "valid" || token !== telegramValidatedToken)) {
+    if (!silent) showToast("请先验证 Bot Token", "error");
     return false;
   }
-
   try {
     await chrome.storage.local.set({
       telegramMessageNotificationsEnabled: enabled,
@@ -324,7 +436,7 @@ async function saveTelegramConfig({ allowIncompleteConfig = false, silent = fals
 async function sendTelegramTest(event) {
   const button = event.currentTarget;
   const targetId = button.dataset.telegramTargetTest;
-  if (!targetId || !await saveTelegramConfig({ allowIncompleteConfig: true, silent: true })) return;
+  if (!targetId || !await saveTelegramConfig({ silent: true })) return;
   button.disabled = true;
   try {
     const response = await chrome.runtime.sendMessage({ type: "telegram:test", payload: { targetId } });
@@ -338,7 +450,7 @@ async function sendTelegramTest(event) {
 }
 
 async function openTelegramBot() {
-  if (!await saveTelegramConfig({ allowIncompleteConfig: true, silent: true })) return;
+  if (!await saveTelegramConfig({ silent: true })) return;
   try {
     await chrome.storage.local.set({
       telegramPendingPersonalTargetName: document.querySelector("#telegramTargetName").value.trim() || "个人聊天"
@@ -403,7 +515,7 @@ async function addTelegramTarget() {
   document.querySelector("#telegramDirectTopicPickerButton").setAttribute("aria-expanded", "false");
   renderTelegramTargets();
   syncTelegramTargetFields();
-  if (await saveTelegramConfig({ allowIncompleteConfig: true, silent: true })) showToast("接收目标已添加");
+  if (await saveTelegramConfig({ silent: true })) showToast("接收目标已添加");
 }
 
 async function handleTelegramTargetListClick(event) {
@@ -415,14 +527,9 @@ async function handleTelegramTargetListClick(event) {
   const button = event.target.closest("[data-remove-telegram-target]");
   if (!button) return;
   telegramTargets = telegramTargets.filter((target) => target.id !== button.dataset.removeTelegramTarget);
-  const hasTarget = telegramTargets.some((target) => target.enabled !== false && target.chatId);
-  if (!hasTarget) {
-    document.querySelector("#telegramMessageNotificationsEnabled").checked = false;
-    document.querySelector("#telegramPostNotificationsEnabled").checked = false;
-  }
   renderTelegramTargets();
-  const saved = await saveTelegramConfig();
-  if (saved) showToast(hasTarget ? "目标删除并保存成功" : "目标删除、通知已关闭并保存成功");
+  const saved = await saveTelegramConfig({ silent: true });
+  if (saved) showToast("推送目标已删除并保存成功");
 }
 
 async function handleTelegramTargetEnabledChange(event) {
@@ -431,7 +538,7 @@ async function handleTelegramTargetEnabledChange(event) {
   const target = telegramTargets.find((item) => item.id === input.dataset.telegramTargetEnabled);
   if (!target) return;
   target.enabled = input.checked;
-  await saveTelegramConfig({ allowIncompleteConfig: true });
+  await saveTelegramConfig();
   renderTelegramTargets();
 }
 
@@ -496,10 +603,20 @@ function syncTelegramTargetFields() {
 }
 
 function syncTelegramSetupVisibility() {
-  const hasToken = Boolean(document.querySelector("#telegramBotToken").value.trim());
-  document.querySelector("#telegramProtectedSettings").hidden = !hasToken;
-  document.querySelector("#telegramTargetDependentSettings").hidden = !hasToken
+  const token = document.querySelector("#telegramBotToken").value.trim();
+  const hasValidToken = telegramTokenValidationState === "valid"
+    && Boolean(token)
+    && token === telegramValidatedToken;
+  document.querySelector("#telegramProtectedSettings").hidden = !hasValidToken;
+  document.querySelector("#telegramTargetDependentSettings").hidden = !hasValidToken
     || !telegramTargets.some((target) => String(target?.chatId || "").trim());
+}
+
+function setTelegramTokenStatus(message, state = "") {
+  const status = document.querySelector("#telegramTokenStatus");
+  status.textContent = message;
+  status.dataset.state = state;
+  status.hidden = !message;
 }
 
 function normalizeTelegramChannelInput(value) {
@@ -820,7 +937,7 @@ function renderTelegramKeywordRules() {
   list.replaceChildren();
   telegramKeywordRules.forEach((rule) => {
     const item = document.createElement("li");
-    item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}`;
+    item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}${rule.id === telegramKeywordEditingRuleId ? " is-editing" : ""}`;
     item.dataset.telegramRuleId = rule.id;
     item.title = "点击卡片编辑规则";
     const enabledLabel = document.createElement("label");
@@ -900,6 +1017,7 @@ function handleTelegramKeywordRuleClick(event) {
   const rule = telegramKeywordRules.find((entry) => entry.id === item?.dataset.telegramRuleId);
   if (!rule) return;
   setTelegramKeywordEditingRule(rule);
+  renderTelegramKeywordRules();
   document.querySelector("#telegramKeywordInput").focus();
 }
 

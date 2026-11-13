@@ -24,6 +24,15 @@
       "world": "MAIN"
     },
     {
+      "js": [
+        "src/content/quick-jump.js"
+      ],
+      "matches": [
+        "https://www.nodeseek.com/*"
+      ],
+      "run_at": "document_start"
+    },
+    {
       "css": [
         "src/avatar-effects.css",
         "src/content.css"
@@ -77,5 +86,5 @@
     "storage",
     "unlimitedStorage"
   ],
-  "version": "1.0.14"
+  "version": "1.0.19"
 }

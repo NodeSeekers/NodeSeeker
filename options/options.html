@@ -374,6 +374,17 @@
             <p class="config-description">开启后，保持 Chrome 运行并登录 NodeSeek。插件会在 UTC+8 每日零点尝试签到；必要时短暂打开后台标签完成签到，成功后自动关闭；失败后每 5 分钟重试。</p>
           </section>
 
+          <section class="config-group" aria-labelledby="quickJumpTitle">
+            <label class="quick-page-option">
+              <span id="quickJumpTitle">快速跳转</span>
+              <span class="switch switch-small">
+                <input id="quickJumpEnabled" name="quickJumpEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">开启后，点击 NodeSeek 外链时跳过 /jump 确认页，直接前往目标网址；不解析短链或清理跟踪参数。</p>
+          </section>
+
           <section class="config-group" aria-labelledby="imagePreviewTitle">
             <label class="quick-page-option">
               <span id="imagePreviewTitle">帖子图片预览</span>
@@ -411,6 +422,9 @@
             <h3 id="telegramMessageTitle">Telegram 通知</h3>
             <div class="telegram-section telegram-token-section">
               <label><span>Bot Token</span><input id="telegramBotToken" type="password" autocomplete="off" spellcheck="false"></label>
+              <div class="telegram-token-status-row">
+                <p id="telegramTokenStatus" class="config-description telegram-token-status" role="status" aria-live="polite" hidden></p>
+              </div>
               <p class="config-description"><a href="https://t.me/BotFather" target="_blank" rel="noreferrer">创建机器人并获取 Token：@BotFather</a></p>
             </div>
 

@@ -54,6 +54,7 @@ const DEFAULT_OPTIONS = {
   attendanceReminderEnabled: true,
   autoAttendanceEnabled: false,
   autoAttendanceMode: "random",
+  quickJumpEnabled: true,
   imagePreviewEnabled: true,
   messageEntryEnabled: true,
   editorToolsEnabled: true,

@@ -543,6 +543,20 @@ form {
   border-color: var(--options-accent);
 }
 
+.telegram-keyword-rule.is-editing {
+  border-color: var(--options-accent);
+  background: var(--options-accent-soft);
+  box-shadow: 0 0 0 2px var(--options-accent-border);
+}
+
+.telegram-keyword-rule.is-editing .telegram-keyword-tags::before {
+  content: "编辑中";
+  flex: 0 0 100%;
+  color: var(--options-accent-link);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .telegram-keyword-rule:not(.has-exclusions) {
   grid-template-areas:
     "toggle remove"
@@ -673,6 +687,25 @@ form {
   margin: 0 0 18px;
   padding: 0;
   border: 0;
+}
+
+.telegram-token-status-row {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.telegram-token-status-row .config-description {
+  margin: 0;
+}
+
+.telegram-token-status[data-state="valid"] {
+  color: var(--options-accent-link);
+}
+
+.telegram-token-status[data-state="invalid"],
+.telegram-token-status[data-state="error"] {
+  color: var(--options-danger);
 }
 
 #telegramProtectedSettings {

@@ -61,8 +61,8 @@ async function scheduleTelegramMonitorAlarm(resetMessageBaseline = false) {
   const config = await chrome.storage.local.get({
     [TELEGRAM_KEYS.token]: "",
     [TELEGRAM_KEYS.targets]: [],
-    [TELEGRAM_KEYS.messagesEnabled]: false,
-    [TELEGRAM_KEYS.postsEnabled]: false,
+    [TELEGRAM_KEYS.messagesEnabled]: true,
+    [TELEGRAM_KEYS.postsEnabled]: true,
     [TELEGRAM_KEYS.paused]: false
   });
   const targets = Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [];
@@ -97,8 +97,8 @@ async function checkTelegramNotifications() {
     const config = await chrome.storage.local.get({
       [TELEGRAM_KEYS.token]: "",
       [TELEGRAM_KEYS.targets]: [],
-      [TELEGRAM_KEYS.messagesEnabled]: false,
-      [TELEGRAM_KEYS.postsEnabled]: false,
+      [TELEGRAM_KEYS.messagesEnabled]: true,
+      [TELEGRAM_KEYS.postsEnabled]: true,
       [TELEGRAM_KEYS.keywords]: [],
       [TELEGRAM_KEYS.blockedKeywords]: [],
       [TELEGRAM_KEYS.boards]: [],
@@ -359,16 +359,61 @@ async function sendTelegramTestMessage(targetId = "") {
   return { message: `测试通知已发送到 ${selectedTargets.length} 个目标` };
 }
 
+async function validateTelegramBotToken(tokenValue) {
+  const bot = await getTelegramBotInfo(tokenValue);
+  return { username: bot.username, firstName: bot.first_name || "" };
+}
+
+async function getTelegramBotInfo(tokenValue) {
+  const token = String(tokenValue || "").trim();
+  if (!token) throw new Error("请先填写 Bot Token");
+  if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
+    const error = new Error("Bot Token 格式无效");
+    error.invalidToken = true;
+    throw error;
+  }
+
+  let response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  try {
+    response = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+      cache: "no-store",
+      credentials: "omit",
+      redirect: "error",
+      signal: controller.signal
+    });
+  } catch (_error) {
+    throw new Error("无法连接 Telegram API，请检查网络后重试");
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  let result;
+  try {
+    result = await response.json();
+  } catch (_error) {
+    throw new Error("Telegram API 响应无效");
+  }
+
+  if (!response.ok || !result?.ok || !result.result?.username) {
+    const invalidToken = [401, 404].includes(Number(response.status))
+      || [401, 404].includes(Number(result?.error_code));
+    const error = new Error(invalidToken
+      ? "Bot Token 无效"
+      : result?.description || `Telegram API 返回 HTTP ${response.status}`);
+    error.invalidToken = invalidToken;
+    throw error;
+  }
+  return result.result;
+}
+
 async function getTelegramBotLink() {
   const config = await chrome.storage.local.get(TELEGRAM_KEYS.token);
   const token = String(config[TELEGRAM_KEYS.token] || "").trim();
   if (!token) throw new Error("请先填写并保存 Bot Token");
-  const response = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-  const result = await response.json();
-  if (!response.ok || !result?.ok || !result.result?.username) {
-    throw new Error(result?.description || "无法读取机器人用户名");
-  }
-  return `https://t.me/${result.result.username}?start=nodeseek_helper`;
+  const bot = await getTelegramBotInfo(token);
+  return `https://t.me/${bot.username}?start=nodeseek_helper`;
 }
 
 function findTelegramPersonalStartUpdate(updates, sinceSeconds = 0) {
@@ -543,7 +588,7 @@ async function registerTelegramPersonalStartUpdate(token, update) {
   if (updateId <= lastRepliedUpdateId) return;
   try {
     const reply = targetAdded
-      ? existingTarget ? "这个聊天已在插件的推送目标中。" : "已收到 /start，接收目标已添加到插件设置。"
+      ? existingTarget ? "这个聊天已在插件的推送目标中。" : "设置成功，请返回插件查看"
       : "推送目标已满，请返回插件移除一个目标后重试。";
     await sendTelegramMessage(token, { type: "personal", chatId }, reply);
     await chrome.storage.local.set({ [TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]: updateId });

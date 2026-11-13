@@ -635,7 +635,7 @@ function createFollowRuleKeywordRuleList(group) {
 
 function createFollowRuleKeywordRuleCard(rule) {
   const item = document.createElement("li");
-  item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}`;
+  item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}${rule.id === pendingFollowRuleEditor.editingRuleId ? " is-editing" : ""}`;
   item.dataset.followRuleKeywordRuleId = rule.id;
   item.title = "点击卡片编辑规则";
   item.addEventListener("click", (event) => {
@@ -830,7 +830,7 @@ function addPendingFollowRuleItem(input) {
 
 function parseFollowRuleEditorItems(value) {
   const seen = new Set();
-  return String(value || "").split(/[\r\n,，]+/)
+  return String(value || "").split(/[,，\s]+/)
     .map(normalizeFollowRuleText)
     .filter((item) => {
       if (!item) return false;

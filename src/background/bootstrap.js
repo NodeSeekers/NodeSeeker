@@ -91,6 +91,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "telegram:validateToken") {
+    validateTelegramBotToken(message.payload?.token)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({
+        ok: false,
+        error: error.message || String(error),
+        invalidToken: error.invalidToken === true
+      }));
+    return true;
+  }
+
   if (message.type === "telegram:test") {
     sendTelegramTestMessage(message.payload?.targetId || "")
       .then((result) => sendResponse({ ok: true, result }))

@@ -201,6 +201,7 @@ async function saveOptions(event) {
       attendanceReminderEnabled: form.attendanceReminderEnabled.checked,
       autoAttendanceEnabled: form.autoAttendanceEnabled.checked,
       autoAttendanceMode: form.autoAttendanceMode.value === "fixed" ? "fixed" : "random",
+      quickJumpEnabled: form.quickJumpEnabled.checked,
       imagePreviewEnabled: form.imagePreviewEnabled.checked,
       messageEntryEnabled: form.messageEntryEnabled.checked,
       editorToolsEnabled: form.editorToolsEnabled.checked,
@@ -324,6 +325,7 @@ function setFormValues(options) {
   form.attendanceReminderEnabled.checked = options.attendanceReminderEnabled;
   form.autoAttendanceEnabled.checked = options.autoAttendanceEnabled;
   form.autoAttendanceMode.value = options.autoAttendanceMode;
+  form.quickJumpEnabled.checked = options.quickJumpEnabled;
   form.imagePreviewEnabled.checked = options.imagePreviewEnabled;
   form.messageEntryEnabled.checked = options.messageEntryEnabled;
   form.editorToolsEnabled.checked = options.editorToolsEnabled;
@@ -371,6 +373,7 @@ function normalizeStoredOptions(options) {
     attendanceReminderEnabled: options.attendanceReminderEnabled !== false,
     autoAttendanceEnabled: options.autoAttendanceEnabled === true,
     autoAttendanceMode: options.autoAttendanceMode === "fixed" ? "fixed" : "random",
+    quickJumpEnabled: options.quickJumpEnabled !== false,
     imagePreviewEnabled: options.imagePreviewEnabled !== false,
     messageEntryEnabled: options.messageEntryEnabled !== false,
     editorToolsEnabled: options.editorToolsEnabled !== false,
@@ -931,9 +934,10 @@ function showToast(text, type = "success") {
 
   window.clearTimeout(toastTimer);
   toastRoot.replaceChildren(toast);
+  const duration = normalizedType === "error" ? 6000 : normalizedType === "warning" ? 4000 : 2500;
   toastTimer = window.setTimeout(() => {
     toast.remove();
-  }, normalizedType === "warning" ? 4000 : 2500);
+  }, duration);
 }
 
 function showPendingSaveToast() {
