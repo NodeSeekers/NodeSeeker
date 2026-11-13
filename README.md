@@ -12,9 +12,12 @@
 - [GitHub：NodeSeekers/NodeSeeker](https://github.com/NodeSeekers/NodeSeeker)
 
 > [!tip]
-> 安装插件->登录账号
-> 不用打开NS，不用第三方托管，不用服务器部署，数据就在本地
-> 接收重要消息通知
+> 🧩 安装插件 → 登录账号
+> 🔒 不用打开NS，不用第三方托管，不用服务器部署，数据就在本地
+> 🔔 接收重要消息通知
+
+> [!caution]
+> 📵 插件不支持手机
 
 ---
 
@@ -59,10 +62,11 @@
 
 ## 📥 安装
 
-1. [下载最新版本安装包](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip)，解压安装包。
-2. 在 Chrome 打开 `chrome://extensions`，开启“开发者模式”。
-3. 点击“加载已解压的扩展程序”，选择项目目录。
-4. 打开扩展选项页，按需配置和开启功能。
+1. [下载最新安装包](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip)，
+2. 解压安装包。
+3. 在 Chrome 打开 `chrome://extensions`，开启“开发者模式”。
+4. 点击“加载已解压的扩展程序”，选择项目目录。
+5. 打开扩展选项页，按需配置和开启功能。
 
 ## 🔐 配置与隐私
 
