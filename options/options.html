@@ -2,14 +2,14 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8">
-    <title>NodeSeek Helper 设置</title>
+    <title>NodeSeeker 设置</title>
     <link rel="stylesheet" href="../src/avatar-effects.css">
     <link rel="stylesheet" href="options.css">
   </head>
   <body>
     <main class="options-shell">
       <aside class="options-sidebar">
-        <h1>NodeSeek Helper</h1>
+        <h1>NodeSeeker</h1>
         <nav class="options-menu" aria-label="设置菜单">
           <button class="menu-button active" type="button" data-panel-target="label-panel">
             <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -175,13 +175,21 @@
 
           <section class="config-group" aria-labelledby="profileHoverSignatureTitle">
             <label class="quick-page-option">
-              <span id="profileHoverSignatureTitle">头像悬停显示用户主页</span>
+              <span id="profileHoverSignatureTitle">头像悬停显示用户预览</span>
               <span class="switch switch-small">
                 <input id="profileHoverSignatureEnabled" name="profileHoverSignatureEnabled" class="switch-input" type="checkbox">
                 <span class="switch-track" aria-hidden="true"></span>
               </span>
             </label>
-            <p class="config-description">悬停帖子列表中的用户头像时预览用户资料、主题和评论入口及个人介绍。</p>
+            <p class="config-description">开启后，悬停帖子列表中的用户头像时显示用户资料卡或趋势图。</p>
+            <label class="quick-page-option">
+              <span>悬停时显示用户趋势图</span>
+              <span class="switch switch-small">
+                <input id="profileHoverTrendEnabled" name="profileHoverTrendEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <p class="config-description">开启后显示近 7 天和近 30 天趋势；关闭时显示用户资料和个人介绍。</p>
           </section>
 
           <section class="config-group" aria-labelledby="cacheTimeTitle">
@@ -366,21 +374,6 @@
             <p class="config-description">开启后，保持 Chrome 运行并登录 NodeSeek。插件会在 UTC+8 每日零点尝试签到；必要时短暂打开后台标签完成签到，成功后自动关闭；失败后每 5 分钟重试。</p>
           </section>
 
-          <section class="config-group" aria-labelledby="linkPurifierTitle">
-            <label class="quick-page-option">
-              <span id="linkPurifierTitle">链接净化</span>
-              <span class="switch switch-small">
-                <input id="linkPurifierEnabled" name="linkPurifierEnabled" class="switch-input" type="checkbox">
-                <span class="switch-track" aria-hidden="true"></span>
-              </span>
-            </label>
-            <div class="telegram-actions">
-              <button id="grantShortLinkPermissions" type="button">授权解析常见短链</button>
-              <span id="shortLinkPermissionStatus" class="config-description">未授权时仍会绕过 NodeSeek 确认页并清理跟踪参数。</span>
-            </div>
-            <p class="config-description">绕过 NodeSeek /jump 确认页，移除常见跟踪参数。解析 bit.ly、t.co 等短链需要单独授权对应域名；授权后仅用于读取跳转地址。</p>
-          </section>
-
           <section class="config-group" aria-labelledby="imagePreviewTitle">
             <label class="quick-page-option">
               <span id="imagePreviewTitle">帖子图片预览</span>
@@ -414,122 +407,114 @@
             <p class="config-description">在帖子和评论编辑器添加格式按钮，可插入引用、代码、不同类型的 Callout、NodeSeek Tabs 和 Mermaid 模板。</p>
           </section>
 
-          <section id="telegramConfigGroup" class="config-group" aria-labelledby="telegramMessageTitle">
+          <section id="telegramConfigGroup" class="config-group telegram-config-group" aria-labelledby="telegramMessageTitle">
             <h3 id="telegramMessageTitle">Telegram 通知</h3>
-            <label><span>Bot Token</span><input id="telegramBotToken" type="password" autocomplete="off" spellcheck="false"></label>
-            <p class="config-description">先通过 @BotFather 创建机器人并填写 Token，再按目标类型填写对应信息。</p>
+            <div class="telegram-section telegram-token-section">
+              <label><span>Bot Token</span><input id="telegramBotToken" type="password" autocomplete="off" spellcheck="false"></label>
+              <p class="config-description"><a href="https://t.me/BotFather" target="_blank" rel="noreferrer">创建机器人并获取 Token：@BotFather</a></p>
+            </div>
 
-            <h4>推送目标</h4>
-            <div class="telegram-target-form">
-              <label><span>目标类型</span>
-                <select id="telegramTargetType">
-                  <option value="personal">个人聊天</option>
-                  <option value="direct">频道 Direct</option>
-                </select>
-              </label>
-              <label><span>本地备注名称（选填）</span><input id="telegramTargetName" type="text" maxlength="40" placeholder="例如：个人通知、NodeSeek Direct"></label>
-              <div id="telegramPersonalBotStart" class="telegram-actions telegram-target-help">
-                <button id="openTelegramBot" type="button">打开机器人并开始监听</button>
-                <span class="config-description">点 Start 后自动填入 Chat ID；监听最长 5 分钟。</span>
-              </div>
-              <label><span id="telegramTargetChatIdLabel">个人 Chat ID</span><input id="telegramTargetChatId" type="text" autocomplete="off" spellcheck="false"></label>
-              <div id="telegramDirectTopicPickerField" class="telegram-direct-picker-field" hidden>
-                <span>选择通知接收对话</span>
-                <button id="telegramDirectTopicPickerButton" type="button" aria-haspopup="listbox" aria-expanded="false">
-                  <span id="telegramDirectTopicPickerLabel">读取可用接收对话</span><span aria-hidden="true">⌄</span>
-                </button>
-                <div id="telegramDirectTopicMenu" class="telegram-direct-topic-menu" role="listbox" aria-label="通知接收对话" hidden></div>
-              </div>
-              <p id="telegramPersonalTargetHelp" class="config-description telegram-target-help">个人聊天：点上方按钮后每 3 秒读取一次，最长监听 5 分钟；在 Telegram 中点 Start，收到后自动填入 Chat ID。</p>
-              <div id="telegramDirectTargetHelp" class="config-description telegram-target-help telegram-direct-instructions" hidden>
-                <ol>
-                  <li>在目标频道设置里把 Bot 设为管理员，授予“管理 Direct Messages”。</li>
-                  <li>填写频道公开分享链接（如 https://t.me/channel）。</li>
-                  <li>使用频道创建者以外的 Telegram 账号打开频道分享链接，并向频道 Direct 发一条消息；然后在下拉列表中选择该账号作为通知接收者。Telegram 限制频道创建者主动发起对话。</li>
-                  <li>点击“添加目标”。</li>
-                </ol>
-              </div>
-              <div class="telegram-target-actions">
-                <span id="telegramTargetActionHint" class="config-description">读取个人 Chat ID 后，将目标添加到下方列表。</span>
-                <div class="telegram-target-action-buttons">
-                  <button id="addTelegramTarget" type="button">添加目标</button>
+            <div id="telegramProtectedSettings" hidden>
+              <section class="telegram-section" aria-labelledby="telegramTargetListTitle">
+                <h4 id="telegramTargetListTitle">推送目标</h4>
+                <div class="telegram-target-form">
+                  <select id="telegramTargetType" aria-label="目标类型">
+                    <option value="personal">个人</option>
+                    <option value="direct">频道 Direct</option>
+                  </select>
+                  <input id="telegramTargetName" type="text" maxlength="40" value="NodeSeeker 通知" placeholder="通知主题（选填）" aria-label="通知主题">
+                  <button id="openTelegramBot" type="button">Start</button>
+                  <div id="telegramDirectFields" class="telegram-direct-fields" hidden>
+                    <input id="telegramTargetChatId" type="text" autocomplete="off" spellcheck="false" placeholder="频道分享链接（https://t.me/...）" aria-label="频道分享链接">
+                    <div id="telegramDirectTopicPickerField" class="telegram-direct-picker-field">
+                      <button id="telegramDirectTopicPickerButton" type="button" aria-haspopup="listbox" aria-expanded="false">
+                        <span id="telegramDirectTopicPickerLabel">选择通知接收对话</span><span aria-hidden="true">⌄</span>
+                      </button>
+                      <div id="telegramDirectTopicMenu" class="telegram-direct-topic-menu" role="listbox" aria-label="通知接收对话" hidden></div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <h4 id="telegramTargetListTitle" class="telegram-target-list-title">已添加目标</h4>
-            <ul id="telegramTargetList" class="telegram-target-list" aria-label="Telegram 推送目标"></ul>
+                <ul id="telegramTargetList" class="telegram-target-list" aria-label="Telegram 推送目标"></ul>
+              </section>
 
-            <label class="quick-page-option">
-              <span>私信通知（包含发送者和正文）</span>
-              <span class="switch switch-small">
-                <input id="telegramMessageNotificationsEnabled" type="checkbox">
-                <span class="switch-track" aria-hidden="true"></span>
-              </span>
-            </label>
-            <label class="quick-page-option">
-              <span>新帖关键词通知（RSS）</span>
-              <span class="switch switch-small">
-                <input id="telegramPostNotificationsEnabled" type="checkbox">
-                <span class="switch-track" aria-hidden="true"></span>
-              </span>
-            </label>
-            <div class="telegram-actions">
-              <button id="toggleTelegramPause" type="button">暂停监控</button>
-              <span id="telegramMonitorStatus" class="config-description">状态：未启用</span>
-            </div>
-            <div class="telegram-keyword-section">
-              <div class="telegram-keyword-heading">
-                <h4>关键词监控</h4>
-                <span class="config-description">组与组之间是“或”；组内可选“任一”或“全部”命中，并可设置排除词。</span>
-              </div>
-              <div class="telegram-keyword-form">
-                <input id="telegramKeywordInput" type="text" maxlength="120" placeholder="添加关键词或组合，例如：v.ps, gen2">
-                <select id="telegramKeywordMode" aria-label="关键词匹配方式">
-                  <option value="all">全部关键词命中</option>
-                  <option value="any">任一关键词命中</option>
-                </select>
-                <button id="addTelegramKeyword" type="button">添加</button>
-              </div>
-              <label class="telegram-keyword-exclude-field">
-                <span>本条规则排除词（可选，任一命中即跳过）</span>
-                <input id="telegramKeywordExcludeInput" type="text" maxlength="300" placeholder="多个词用逗号分隔，例如：已出, 求购">
-              </label>
-              <ul id="telegramKeywordRuleList" class="telegram-keyword-rule-list" aria-label="关键词监控规则"></ul>
-            </div>
-            <label><span>全局屏蔽词（任一命中时跳过所有规则，每行一个）</span>
-              <textarea id="telegramBlockedKeywords" rows="3" placeholder="已出\n求购"></textarea>
-            </label>
-            <div class="telegram-board-section">
-              <div class="telegram-board-heading">
-                <h4>监控版块</h4>
-                <div class="telegram-actions">
+              <div id="telegramTargetDependentSettings" hidden>
+              <section class="telegram-section" aria-label="通知开关">
+                <div class="telegram-notification-toggles">
+                  <label class="quick-page-option">
+                    <span>私信通知</span>
+                    <span class="switch switch-small">
+                      <input id="telegramMessageNotificationsEnabled" class="switch-input" type="checkbox">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <label class="quick-page-option">
+                    <span>新帖关键词通知</span>
+                    <span class="switch switch-small">
+                      <input id="telegramPostNotificationsEnabled" class="switch-input" type="checkbox">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                </div>
+                <button id="toggleTelegramPause" type="button">暂停监控</button>
+              </section>
+
+              <section class="telegram-section telegram-keyword-section" aria-labelledby="telegramKeywordTitle">
+                <h4 id="telegramKeywordTitle">关键词监控</h4>
+                <div class="telegram-keyword-form">
+                  <input id="telegramKeywordInput" type="text" maxlength="120" placeholder="关键词或组合，例如：v.ps, gen2, 日本 家宽">
+                  <input id="telegramKeywordExcludeInput" type="text" maxlength="300" placeholder="排除词（可选），例如：已出, 求购">
+                  <select id="telegramKeywordMode" aria-label="关键词匹配方式">
+                    <option value="all">全部关键词命中</option>
+                    <option value="any">任一关键词命中</option>
+                  </select>
+                  <button id="addTelegramKeyword" type="button">添加</button>
+                </div>
+                <ul id="telegramKeywordRuleList" class="telegram-keyword-rule-list" aria-label="关键词监控规则"></ul>
+                <label><span>全局屏蔽词</span>
+                  <textarea id="telegramBlockedKeywords" rows="3" placeholder="每行一个关键词"></textarea>
+                </label>
+              </section>
+
+              <section class="telegram-section telegram-board-section" aria-labelledby="telegramBoardTitle">
+                <div class="telegram-board-heading">
+                  <h4 id="telegramBoardTitle">监控版块</h4>
                   <button id="selectAllTelegramBoards" type="button">全选</button>
                 </div>
+                <div id="telegramBoardSlugs" class="telegram-board-grid" role="group" aria-label="监控版块">
+                  <label><input type="checkbox" value="daily" data-telegram-board>日常</label>
+                  <label><input type="checkbox" value="tech" data-telegram-board>技术</label>
+                  <label><input type="checkbox" value="info" data-telegram-board>情报</label>
+                  <label><input type="checkbox" value="review" data-telegram-board>测评</label>
+                  <label><input type="checkbox" value="trade" data-telegram-board>交易</label>
+                  <label><input type="checkbox" value="carpool" data-telegram-board>拼车</label>
+                  <label><input type="checkbox" value="promo" data-telegram-board>推广</label>
+                  <label><input type="checkbox" value="life" data-telegram-board>生活</label>
+                  <label><input type="checkbox" value="dev" data-telegram-board>Dev</label>
+                  <label><input type="checkbox" value="photo-share" data-telegram-board>贴图</label>
+                  <label><input type="checkbox" value="expose" data-telegram-board>曝光</label>
+                  <label><input type="checkbox" value="inner" data-telegram-board>内版</label>
+                  <label><input type="checkbox" value="sandbox" data-telegram-board>沙盒</label>
+                </div>
+              </section>
+
+              <section class="telegram-section telegram-history-section" aria-labelledby="telegramHistoryTitle">
+                <div class="telegram-history-heading">
+                  <h4 id="telegramHistoryTitle">最近推送</h4>
+                  <div class="telegram-history-actions" hidden>
+                    <button id="telegramHistoryReset" type="button">重置</button>
+                    <button id="telegramHistorySelectAll" type="button">全选</button>
+                    <button id="telegramHistoryDeleteSelected" type="button" disabled>删除</button>
+                    <button id="telegramHistoryDone" type="button">完成</button>
+                  </div>
+                </div>
+                <ul id="telegramRssHistory" class="telegram-target-list" aria-label="最近 Telegram 推送"></ul>
+              </section>
               </div>
-              <div id="telegramBoardSlugs" class="telegram-board-grid" role="group" aria-label="监控版块">
-                <label><input type="checkbox" value="daily" data-telegram-board>日常</label>
-                <label><input type="checkbox" value="tech" data-telegram-board>技术</label>
-                <label><input type="checkbox" value="info" data-telegram-board>情报</label>
-                <label><input type="checkbox" value="review" data-telegram-board>测评</label>
-                <label><input type="checkbox" value="trade" data-telegram-board>交易</label>
-                <label><input type="checkbox" value="carpool" data-telegram-board>拼车</label>
-                <label><input type="checkbox" value="promo" data-telegram-board>推广</label>
-                <label><input type="checkbox" value="life" data-telegram-board>生活</label>
-                <label><input type="checkbox" value="dev" data-telegram-board>Dev</label>
-                <label><input type="checkbox" value="photo-share" data-telegram-board>贴图</label>
-                <label><input type="checkbox" value="expose" data-telegram-board>曝光</label>
-                <label><input type="checkbox" value="inner" data-telegram-board>内版</label>
-                <label><input type="checkbox" value="sandbox" data-telegram-board>沙盒</label>
-              </div>
-              <p class="config-description">默认全选；取消勾选后按所选版块过滤。未选版块时按全部版块处理。</p>
+
+              <section class="telegram-section telegram-reset-section" aria-label="恢复默认设置">
+                <button id="resetTelegramConfig" type="button">恢复 Telegram 默认配置</button>
+              </section>
             </div>
-            <div class="telegram-actions">
-              <button id="testTelegramConfig" type="button">发送测试通知</button>
-              <span class="config-description">配置调整后自动保存，成功时会提示。</span>
-            </div>
-            <h4>最近推送</h4>
-            <ul id="telegramRssHistory" class="telegram-target-list" aria-label="最近 Telegram 推送"></ul>
-            <p class="config-description">新帖通过 NodeSeek RSS 监控，不依赖打开板块页面；浏览器需保持运行。首次启用只记录 RSS 当前进度，不补发旧帖。私信通过登录态消息列表检查，只转发启用后的新私信。Token、目标和规则只保存在本机，不会随配置备份导出；发送到频道 Direct 后，该主题的成员都可能看到私信正文。</p>
           </section>
 
           <section class="config-group" aria-labelledby="postSwitcherTitle">
@@ -564,7 +549,6 @@
               <span>翻页延迟（毫秒）</span>
               <input id="autoPageDelayMs" name="autoPageDelayMs" type="number" min="0" step="1" value="100" required>
             </label>
-            <p class="config-description">页面到达顶部或底部并停留指定时间后翻页；开启瀑布流时等待后追加下一页，关闭时导航到下一页。正在编辑回复或存在未提交回复草稿时暂停翻页。</p>
           </section>
 
           <section class="config-group" aria-labelledby="readingShortcutTitle">
@@ -591,11 +575,15 @@
                 <input id="quickReplyShortcut" name="quickReplyShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
               </label>
               <label>
+                <span>快捷回复</span>
+                <input id="replySubmitShortcut" name="replySubmitShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
+              </label>
+              <label>
                 <span>快捷短语</span>
                 <input id="quickPhraseShortcut" name="quickPhraseShortcut" type="text" placeholder="按下快捷键，留空禁用" autocomplete="off" readonly data-shortcut-input>
               </label>
             </div>
-            <p class="config-description">点击输入框后按下组合键，按 Backspace 或 Delete 清空。上一页/下一页适用于首页帖子列表和帖子详情页；前一个帖子/后一个帖子仅在从列表进入的帖子详情页生效；快捷评论和快捷短语仅在帖子详情页生效。快捷键分别受对应功能开关控制，且仅在非输入状态下触发。发帖和评论编辑器支持 Mac 的 ⌘+Enter；其他平台使用 Ctrl+Enter，按下后会立即提交当前编辑器内容。</p>
+            <p class="config-description">点击输入框后按下组合键，按 Backspace 或 Delete 清空。上一页/下一页适用于帖子列表和帖子详情页；前一个帖子/后一个帖子、快捷评论和快捷短语仅在帖子详情页生效。快捷回复仅在评论编辑器中生效，默认 Mac 为 ⌘+Enter、Windows 为 Ctrl+Enter。</p>
           </section>
         </section>
 

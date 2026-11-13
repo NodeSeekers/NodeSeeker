@@ -2,11 +2,13 @@ const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { webcrypto } = require("node:crypto");
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../src/background/telegram-notifications.js"), "utf8");
 
 function createSandbox(fetch = global.fetch) {
   const sandbox = vm.createContext({
+    crypto: webcrypto,
     URL,
     Set,
     Object,
@@ -197,7 +199,10 @@ test("personal /start listener fills Chat ID, replies, and stops its alarm", asy
       get: async (query) => typeof query === "string"
         ? { [query]: stored[query] }
         : { ...query, ...stored },
-      set: async (values) => Object.assign(stored, values)
+      set: async (values) => Object.assign(stored, values),
+      remove: async (keys) => {
+        for (const key of [].concat(keys)) delete stored[key];
+      }
     } },
     alarms: { clear: async (name) => { clearedAlarm = name; } },
     runtime: { sendMessage: async (message) => runtimeMessages.push(message) }
@@ -206,12 +211,22 @@ test("personal /start listener fills Chat ID, replies, and stops its alarm", asy
 
   await vm.runInContext("checkTelegramPersonalStartWatch()", sandbox);
 
-  expect(stored.telegramPendingPersonalChatId).toBe("222");
+  expect(stored.telegramTargets).toEqual([expect.objectContaining({
+    name: "个人聊天",
+    type: "personal",
+    chatId: "222",
+    enabled: true
+  })]);
+  expect(stored.telegramPendingPersonalChatId).toBeUndefined();
   expect(stored.telegramPersonalStartWatchUntil).toBe(0);
   expect(clearedAlarm).toBe("nshTelegram:personal-start");
   expect(sentReplies[0].slice(0, 2)).toEqual(["123456:secret", { type: "personal", chatId: "222" }]);
-  expect(sentReplies[0][2]).toContain("Chat ID 已自动填入");
-  expect(runtimeMessages).toContainEqual({ type: "telegram:personalChatIdDetected", chatId: "222" });
+  expect(sentReplies[0][2]).toContain("接收目标已添加");
+  expect(runtimeMessages).toContainEqual(expect.objectContaining({
+    type: "telegram:personalChatIdDetected",
+    chatId: "222",
+    targetAdded: true
+  }));
 });
 
 test("personal /start listener advances past a full old update batch", async () => {
@@ -241,7 +256,10 @@ test("personal /start listener advances past a full old update batch", async () 
       get: async (query) => typeof query === "string"
         ? { [query]: stored[query] }
         : { ...query, ...stored },
-      set: async (values) => Object.assign(stored, values)
+      set: async (values) => Object.assign(stored, values),
+      remove: async (keys) => {
+        for (const key of [].concat(keys)) delete stored[key];
+      }
     } },
     alarms: { clear: async () => {} },
     runtime: { sendMessage: async () => {} }
@@ -252,7 +270,12 @@ test("personal /start listener advances past a full old update batch", async () 
 
   expect(requests).toHaveLength(2);
   expect(requests[1]).toContain("offset=101");
-  expect(stored.telegramPendingPersonalChatId).toBe("222");
+  expect(stored.telegramTargets).toEqual([expect.objectContaining({
+    type: "personal",
+    chatId: "222",
+    enabled: true
+  })]);
+  expect(stored.telegramPendingPersonalChatId).toBeUndefined();
   expect(stored.telegramPersonalStartOffset).toBe(102);
   expect(replies).toHaveLength(1);
 });
@@ -371,7 +394,7 @@ test("private message notifications ignore messages sent by the current user", a
           {
             sender_id: "777",
             receiver_id: "333",
-            sender_name: "fixture-current-user",
+            sender_name: "test_sender",
             content: "我主动发出的消息",
             viewed: false,
             max_id: 2

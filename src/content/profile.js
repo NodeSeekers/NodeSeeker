@@ -442,23 +442,39 @@ async function showProfileTrendPopup(anchor, memberId, memberName) {
   profileTrendAnchor = anchor;
 
   const popup = ensureProfileTrendPopup();
-  renderProfileHomeMessage(popup, memberId, memberName, "正在加载用户资料…");
+  const showTrends = featureOptions.profileHoverTrendEnabled;
+  if (showTrends) {
+    popup.classList.remove("nsh-profile-home-popup");
+    renderProfileTrendLoading(popup, memberId, memberName);
+  } else {
+    renderProfileHomeMessage(popup, memberId, memberName, "正在加载用户资料…");
+  }
   positionProfileTrendPopup(popup, anchor);
 
   try {
-    const profile = await loadProfileHomeData(memberId);
+    const result = showTrends
+      ? await loadProfileTrendEntries(memberId)
+      : await loadProfileHomeData(memberId);
     if (requestId !== profileTrendRequestId || profileTrendAnchor !== anchor) {
       return;
     }
 
-    renderProfileHomePreview(popup, memberId, memberName, profile);
+    if (showTrends) {
+      renderProfileTrendContent(popup, memberId, memberName, result);
+    } else {
+      renderProfileHomePreview(popup, memberId, memberName, result);
+    }
     positionProfileTrendPopup(popup, anchor);
   } catch (_error) {
     if (requestId !== profileTrendRequestId || profileTrendAnchor !== anchor) {
       return;
     }
 
-    renderProfileHomeMessage(popup, memberId, memberName, "用户资料加载失败");
+    if (showTrends) {
+      renderProfileTrendMessage(popup, memberId, memberName, "趋势数据加载失败");
+    } else {
+      renderProfileHomeMessage(popup, memberId, memberName, "用户资料加载失败");
+    }
     positionProfileTrendPopup(popup, anchor);
   }
 }
@@ -614,8 +630,10 @@ function hasEnabledProfileTrendGroups() {
 
 function getEnabledProfileTrendGroups(entries) {
   const groups = [];
+  const showDefaultRanges = !featureOptions.profileTrend7DaysEnabled
+    && !featureOptions.profileTrend30DaysEnabled;
 
-  if (featureOptions.profileTrend7DaysEnabled) {
+  if (featureOptions.profileTrend7DaysEnabled || showDefaultRanges) {
     groups.push({
       title: "近 7 天",
       entries: getProfileTrendEntriesInDays(entries, PROFILE_TREND_RECENT_DAYS),
@@ -623,7 +641,7 @@ function getEnabledProfileTrendGroups(entries) {
     });
   }
 
-  if (featureOptions.profileTrend30DaysEnabled) {
+  if (featureOptions.profileTrend30DaysEnabled || showDefaultRanges) {
     groups.push({
       title: "近 30 天",
       entries,

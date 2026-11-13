@@ -1,6 +1,5 @@
 function init() {
   initImagePreview();
-  initLinkPurifier();
   handleNotificationJumpTarget();
   document.addEventListener("keydown", handleNewPostShortcut, true);
   document.addEventListener("focusin", handleAutoPageEditorFocusIn, true);
@@ -98,6 +97,7 @@ function normalizeStoredOptions(options) {
     userStatsEnabled: options.userStatsEnabled !== false,
     profileTrend7DaysEnabled: options.profileTrend7DaysEnabled !== false,
     profileTrend30DaysEnabled: options.profileTrend30DaysEnabled !== false,
+    profileHoverTrendEnabled: options.profileHoverTrendEnabled === true,
     userCacheHours: normalizeUserCacheHours(options.userCacheHours),
     blockFilterEnabled: options.blockFilterEnabled !== false,
     blockFilterQuickKeywordEnabled: options.blockFilterQuickKeywordEnabled !== false,
@@ -132,6 +132,10 @@ function normalizeStoredOptions(options) {
     quickReplyShortcut: normalizeShortcut(
       options.quickReplyShortcut,
       DEFAULT_OPTIONS.quickReplyShortcut
+    ),
+    replySubmitShortcut: normalizeShortcut(
+      options.replySubmitShortcut,
+      DEFAULT_OPTIONS.replySubmitShortcut
     ),
     quickPhrasesEnabled: options.quickPhrasesEnabled !== false,
     quickPhraseShortcut: normalizeShortcut(
@@ -189,7 +193,7 @@ function handleStorageChanged(changes, areaName) {
         }
       }
 
-      if (changes.profileHoverSignatureEnabled) {
+      if (changes.profileHoverSignatureEnabled || changes.profileHoverTrendEnabled) {
         hideProfileTrendPopup();
         scanProfileTrendAvatars();
       }

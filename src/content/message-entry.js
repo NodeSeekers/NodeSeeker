@@ -342,10 +342,32 @@ async function loadNotificationPreviewEntries(key) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
   if (data?.success !== true) throw new Error("通知接口返回异常");
-  const entries = key === "message" ? data.msgArray : data.data;
+  let entries = key === "message" ? data.msgArray : data.data;
   if (!Array.isArray(entries)) throw new Error("通知列表格式异常");
+  if (key === "message") {
+    const currentUserId = getNotificationPreviewCurrentUserId();
+    if (!currentUserId) throw new Error("无法识别当前账号");
+    entries = filterIncomingNotificationMessages(entries, currentUserId);
+  }
   notificationPreviewCache.set(key, { loadedAt: Date.now(), entries });
   return entries;
+}
+
+function getNotificationPreviewCurrentUserId() {
+  const profileLink = document.querySelector(
+    "#nsk-right-panel-container .user-card:not(.hover-user-card) a[href^='/space/']"
+  );
+  return String(profileLink?.getAttribute("href") || "").match(/^\/space\/(\d+)/)?.[1] || "";
+}
+
+function filterIncomingNotificationMessages(entries, currentUserId) {
+  const userId = String(currentUserId || "").trim();
+  if (!userId || !Array.isArray(entries)) return [];
+  return entries.filter((entry) => {
+    const senderId = String(entry?.sender_id ?? "").trim();
+    const receiverId = String(entry?.receiver_id ?? "").trim();
+    return senderId !== "" && senderId !== userId && receiverId === userId;
+  });
 }
 
 function renderNotificationPreviewEntries(popup, item, entries) {

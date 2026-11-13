@@ -5,12 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 await import("./package-local.mjs");
-const dist = path.join(root, "dist");
-const packageDirectory = path.join(dist, "nodeseek-seeker");
+const outputDirectory = path.join(root, "dist");
+const packageDirectory = path.join(outputDirectory, "nodeseeker");
 const manifest = JSON.parse(await fs.readFile(path.join(packageDirectory, "manifest.json"), "utf8"));
-const archive = path.join(dist, `nodeseek-seeker-v${manifest.version}.zip`);
+const archive = path.join(outputDirectory, `nodeseeker-v${manifest.version}.zip`);
 
-await fs.mkdir(dist, { recursive: true });
+await fs.mkdir(outputDirectory, { recursive: true });
 await fs.rm(archive, { force: true });
 execFileSync("zip", ["-r", "-q", "-X", archive, "."], {
   cwd: packageDirectory,

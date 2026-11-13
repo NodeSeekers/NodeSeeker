@@ -4,6 +4,7 @@ const DEFAULT_READING_SHORTCUTS = {
   postSwitcherPreviousShortcut: "Alt+Shift+ArrowLeft",
   postSwitcherNextShortcut: "Alt+Shift+ArrowRight",
   quickReplyShortcut: "",
+  replySubmitShortcut: detectShortcutPlatform() === "mac" ? "Meta+Enter" : "Ctrl+Enter",
   quickPhraseShortcut: ""
 };
 const SHORTCUT_MODIFIERS = ["Ctrl", "Alt", "Shift", "Meta"];

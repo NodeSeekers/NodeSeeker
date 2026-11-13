@@ -4,6 +4,19 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../src/content/editor-upload.js"), "utf8");
+const shortcutsSource = fs.readFileSync(path.resolve(__dirname, "../../src/shortcuts.js"), "utf8");
+
+test("reply shortcut defaults to Command+Enter on macOS and Ctrl+Enter elsewhere", () => {
+  const getDefault = (platform) => {
+    const sandbox = vm.createContext({ navigator: { platform } });
+    vm.runInContext(shortcutsSource, sandbox);
+    return vm.runInContext("DEFAULT_READING_SHORTCUTS.replySubmitShortcut", sandbox);
+  };
+
+  expect(getDefault("MacIntel")).toBe("Meta+Enter");
+  expect(getDefault("Win32")).toBe("Ctrl+Enter");
+  expect(getDefault("Linux x86_64")).toBe("Ctrl+Enter");
+});
 
 class MockElement {
   constructor() {
@@ -27,7 +40,7 @@ class MockElement {
   }
 }
 
-test("Cmd+Enter submits a reply editor on a post detail page", () => {
+test("the configured reply shortcut submits a reply editor on a post detail page", () => {
   const button = {
     textContent: "回复",
     value: "",
@@ -49,6 +62,8 @@ test("Cmd+Enter submits a reply editor on a post detail page", () => {
   const sandbox = vm.createContext({
     Element: MockElement,
     navigator: { platform: "MacIntel" },
+    featureOptions: { replySubmitShortcut: "Meta+Enter" },
+    normalizeShortcutFromEvent: (event) => event.metaKey ? `Meta+${event.key}` : event.ctrlKey ? `Ctrl+${event.key}` : "",
     document: {
       querySelector: () => null,
       createElement: () => ({ setAttribute() {}, remove() {} }),

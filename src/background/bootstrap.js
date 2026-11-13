@@ -109,6 +109,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "telegram:stopPersonalStartWatch") {
+    stopTelegramPersonalStartWatch()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
   if (message.type === "telegram:checkPersonalStartWatch") {
     checkTelegramPersonalStartWatch()
       .then(() => sendResponse({ ok: true }))
@@ -122,13 +129,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "telegram:detectDirectTopicId") {
     getTelegramDirectTopicId(message.payload?.chatId, message.payload?.offset)
-      .then((result) => sendResponse({ ok: true, result }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === "links:resolveShort") {
-    resolveShortLink(message.payload)
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;

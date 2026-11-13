@@ -6,8 +6,9 @@ let selectedTelegramDirectTopic = null;
 let telegramPersonalStartPollTimer = null;
 let telegramPersonalStartWatchUntil = 0;
 let telegramKeywordRules = [];
+let telegramKeywordEditingRuleId = "";
+let selectedTelegramHistoryKeys = new Set();
 form.addEventListener("submit", saveOptions);
-document.querySelector("#grantShortLinkPermissions").addEventListener("click", requestShortLinkPermissions);
 form.addEventListener("input", handleOptionsFormInput);
 form.addEventListener("change", handleOptionsFormInput);
 resetButton.addEventListener("click", confirmResetOptions);
@@ -132,8 +133,8 @@ function initOptions() {
 
 async function restoreTelegramConfig() {
   const config = await chrome.storage.local.get({
-    telegramMessageNotificationsEnabled: false,
-    telegramPostNotificationsEnabled: false,
+    telegramMessageNotificationsEnabled: true,
+    telegramPostNotificationsEnabled: true,
     telegramBotToken: "",
     telegramChatId: "",
     telegramTargets: [],
@@ -177,8 +178,9 @@ async function restoreTelegramConfig() {
   renderTelegramMonitorStatus(config);
   renderTelegramHistory(config.telegramRssHistory);
   syncTelegramTargetFields();
-  if (config.telegramPendingPersonalChatId && document.querySelector("#telegramTargetType").value === "personal") {
-    document.querySelector("#telegramTargetChatId").value = String(config.telegramPendingPersonalChatId);
+  syncTelegramSetupVisibility();
+  if (config.telegramPendingPersonalChatId) {
+    await ensureTelegramPersonalTarget(config.telegramPendingPersonalChatId, config.telegramPendingPersonalTargetName);
   }
   syncTelegramPersonalStartPolling(config.telegramPersonalStartWatchUntil);
 }
@@ -204,12 +206,10 @@ function syncTelegramPersonalStartPolling(watchUntilValue) {
   telegramPersonalStartPollTimer = null;
 }
 
-document.querySelector("#testTelegramConfig").addEventListener("click", sendTelegramTest);
 document.querySelector("#openTelegramBot").addEventListener("click", openTelegramBot);
-document.querySelector("#addTelegramTarget").addEventListener("click", addTelegramTarget);
 document.querySelector("#telegramDirectTopicPickerButton").addEventListener("click", toggleTelegramDirectTopicPicker);
 document.querySelector("#telegramDirectTopicMenu").addEventListener("click", handleTelegramDirectTopicMenuClick);
-document.querySelector("#telegramBotToken").addEventListener("input", scheduleTelegramConfigSave);
+document.querySelector("#telegramBotToken").addEventListener("input", handleTelegramBotTokenInput);
 document.querySelector("#telegramMessageNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramPostNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramBlockedKeywords").addEventListener("input", scheduleTelegramConfigSave);
@@ -217,36 +217,46 @@ document.querySelectorAll("[data-telegram-board]").forEach((input) => {
   input.addEventListener("change", scheduleTelegramConfigSave);
 });
 document.querySelector("#telegramTargetType").addEventListener("change", handleTelegramTargetTypeChange);
-document.querySelector("#telegramTargetType").addEventListener("change", fillPendingTelegramPersonalChatId);
 document.querySelector("#telegramTargetChatId").addEventListener("input", handleTelegramChannelInput);
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
+  if (changes.telegramTargets) {
+    telegramTargets = normalizeTelegramTargets(changes.telegramTargets.newValue);
+    renderTelegramTargets();
+  }
+  if (changes.telegramRssHistory) {
+    renderTelegramHistory(changes.telegramRssHistory.newValue);
+  }
   if (changes.telegramPersonalStartWatchUntil) {
     syncTelegramPersonalStartPolling(changes.telegramPersonalStartWatchUntil.newValue);
   }
   const chatId = changes.telegramPendingPersonalChatId?.newValue;
-  if (chatId && document.querySelector("#telegramTargetType").value === "personal") {
-    applyTelegramDetectedChatId(chatId);
+  if (chatId) {
+    ensureTelegramPersonalTarget(chatId, changes.telegramPendingPersonalTargetName?.newValue);
   }
 });
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "telegram:personalChatIdDetected") {
-    applyTelegramDetectedChatId(message.chatId);
+    applyTelegramDetectedChatId(message);
   }
   if (message?.type === "telegram:personalStartWatchTimeout") {
-    document.querySelector("#telegramTargetChatId").placeholder = "点击上方按钮后等待 /start 自动填入";
-    showToast("5 分钟内未收到 /start，监听已停止；请重新点击上方按钮", "error");
+    showToast("没有收到 /start，监听已停止；点 Start 重试", "error");
   }
   if (message?.type === "telegram:personalStartWatchError") {
-    document.querySelector("#telegramTargetChatId").placeholder = "点击上方按钮后等待 /start 自动填入";
     showToast(`监听失败：${message.error || "Telegram 更新读取失败"}`, "error");
   }
   if (message?.type === "telegram:personalChatIdReplyFailed") {
-    showToast(`Chat ID 已填入，但机器人回复失败：${message.error || "发送失败"}`, "error");
+    showToast(`接收目标已添加，但机器人回复失败：${message.error || "发送失败"}`, "error");
   }
 });
 document.querySelector("#telegramTargetList").addEventListener("click", handleTelegramTargetListClick);
 document.querySelector("#telegramTargetList").addEventListener("change", handleTelegramTargetEnabledChange);
+document.querySelector("#telegramRssHistory").addEventListener("change", handleTelegramHistorySelectionChange);
+document.querySelector("#telegramHistoryReset").addEventListener("click", resetTelegramHistory);
+document.querySelector("#telegramHistorySelectAll").addEventListener("click", selectAllTelegramHistory);
+document.querySelector("#telegramHistoryDeleteSelected").addEventListener("click", deleteSelectedTelegramHistory);
+document.querySelector("#telegramHistoryDone").addEventListener("click", clearTelegramHistorySelection);
+document.querySelector("#resetTelegramConfig").addEventListener("click", resetTelegramConfig);
 document.addEventListener("click", closeTelegramDirectTopicMenuOutside);
 document.querySelector("#toggleTelegramPause").addEventListener("click", toggleTelegramPause);
 document.querySelector("#addTelegramKeyword").addEventListener("click", addTelegramKeywordRule);
@@ -268,15 +278,20 @@ document.querySelector("#selectAllTelegramBoards").addEventListener("click", () 
 
 let telegramConfigSaveTimer = 0;
 
-function scheduleTelegramConfigSave() {
+function handleTelegramBotTokenInput() {
+  syncTelegramSetupVisibility();
+  scheduleTelegramConfigSave({ allowIncompleteConfig: true, silent: true });
+}
+
+function scheduleTelegramConfigSave({ allowIncompleteConfig = false, silent = false } = {}) {
   window.clearTimeout(telegramConfigSaveTimer);
   telegramConfigSaveTimer = window.setTimeout(() => {
     telegramConfigSaveTimer = 0;
-    saveTelegramConfig();
+    saveTelegramConfig({ allowIncompleteConfig, silent });
   }, 450);
 }
 
-async function saveTelegramConfig({ allowIncompleteConfig = false } = {}) {
+async function saveTelegramConfig({ allowIncompleteConfig = false, silent = false } = {}) {
   window.clearTimeout(telegramConfigSaveTimer);
   telegramConfigSaveTimer = 0;
   const enabled = document.querySelector("#telegramMessageNotificationsEnabled").checked;
@@ -298,7 +313,7 @@ async function saveTelegramConfig({ allowIncompleteConfig = false } = {}) {
       telegramBlockedKeywords: parseTelegramTextList(document.querySelector("#telegramBlockedKeywords").value),
       telegramBoardSlugs: getSelectedTelegramBoards()
     });
-    showToast("保存成功");
+    if (!silent) showToast("保存成功");
     return true;
   } catch (error) {
     showToast(formatToastError(error, "保存 Telegram 配置失败"), "error");
@@ -306,14 +321,15 @@ async function saveTelegramConfig({ allowIncompleteConfig = false } = {}) {
   }
 }
 
-async function sendTelegramTest() {
-  const button = document.querySelector("#testTelegramConfig");
-  if (!await saveTelegramConfig()) return;
+async function sendTelegramTest(event) {
+  const button = event.currentTarget;
+  const targetId = button.dataset.telegramTargetTest;
+  if (!targetId || !await saveTelegramConfig({ allowIncompleteConfig: true, silent: true })) return;
   button.disabled = true;
   try {
-    const response = await chrome.runtime.sendMessage({ type: "telegram:test" });
+    const response = await chrome.runtime.sendMessage({ type: "telegram:test", payload: { targetId } });
     if (!response?.ok) throw new Error(response?.error || "发送测试通知失败");
-    showToast("Telegram 测试通知已发送");
+    showToast("测试通知已发送");
   } catch (error) {
     showToast(formatToastError(error, "发送测试通知失败"), "error");
   } finally {
@@ -322,19 +338,21 @@ async function sendTelegramTest() {
 }
 
 async function openTelegramBot() {
-  if (!await saveTelegramConfig()) return;
+  if (!await saveTelegramConfig({ allowIncompleteConfig: true, silent: true })) return;
   try {
+    await chrome.storage.local.set({
+      telegramPendingPersonalTargetName: document.querySelector("#telegramTargetName").value.trim() || "个人聊天"
+    });
     const response = await chrome.runtime.sendMessage({ type: "telegram:openBot" });
     if (!response?.ok) throw new Error(response?.error || "无法打开 Telegram 机器人");
-    document.querySelector("#telegramTargetChatId").placeholder = "正在监听 /start（5 分钟）…";
-    showToast("已打开机器人，正在监听 /start（5 分钟）；请在 Telegram 中点击 Start");
+    showToast("已打开机器人，点击 Telegram 中的 Start 即可添加目标");
   } catch (error) {
     showToast(formatToastError(error, "打开 Telegram 机器人失败"), "error");
   }
 }
 
 async function addTelegramTarget() {
-  const type = document.querySelector("#telegramTargetType").value;
+  const type = "direct";
   const channelInput = document.querySelector("#telegramTargetChatId").value.trim();
   const channelChatId = type === "direct" ? normalizeTelegramChannelInput(channelInput) : "";
   const selectedTopic = type === "direct" ? selectedTelegramDirectTopic : null;
@@ -354,13 +372,9 @@ async function addTelegramTarget() {
     showToast("频道链接已更改，请重新读取接收对话", "error");
     return;
   }
-  if (type === "personal" && !chatId) {
-    showToast("请填写个人 Chat ID", "error");
-    return;
-  }
-  if (type === "direct" && telegramTargets.some((target) => target.type === "direct"
+  if (telegramTargets.some((target) => target.type === "direct"
     && String(target.chatId) === chatId && String(target.topicId) === topicId)) {
-    showToast("这个 Direct 会话已经添加", "error");
+    showToast("这个接收对话已经添加", "error");
     return;
   }
   if (telegramTargets.length >= 10) {
@@ -376,11 +390,9 @@ async function addTelegramTarget() {
     channelChatId: type === "direct" ? channelChatId : "",
     enabled: true
   });
-  document.querySelector("#telegramTargetName").value = "";
-  const remainingTopics = type === "direct"
-    ? telegramDirectTopics.filter((topic) => !telegramTargets.some((target) => target.type === "direct"
-      && String(target.chatId) === String(topic.chatId) && String(target.topicId) === String(topic.topicId)))
-    : [];
+  document.querySelector("#telegramTargetName").value = "NodeSeeker 通知";
+  const remainingTopics = telegramDirectTopics.filter((topic) => !telegramTargets.some((target) => target.type === "direct"
+    && String(target.chatId) === String(topic.chatId) && String(target.topicId) === String(topic.topicId)));
   telegramDirectTopics = remainingTopics;
   selectedTelegramDirectTopic = null;
   renderTelegramDirectTopicMenu();
@@ -389,22 +401,17 @@ async function addTelegramTarget() {
     : telegramDirectNextOffset != null ? "继续读取下一批接收对话" : "读取可用接收对话";
   document.querySelector("#telegramDirectTopicMenu").hidden = true;
   document.querySelector("#telegramDirectTopicPickerButton").setAttribute("aria-expanded", "false");
-  if (type === "personal") document.querySelector("#telegramTargetChatId").value = "";
   renderTelegramTargets();
   syncTelegramTargetFields();
-  const saved = await saveTelegramConfig();
-  if (saved) {
-    if (type === "personal") {
-      const pending = await chrome.storage.local.get("telegramPendingPersonalChatId");
-      if (String(pending.telegramPendingPersonalChatId || "") === chatId) {
-        await chrome.storage.local.remove("telegramPendingPersonalChatId");
-      }
-    }
-    showToast("目标添加并保存成功");
-  }
+  if (await saveTelegramConfig({ allowIncompleteConfig: true, silent: true })) showToast("接收目标已添加");
 }
 
 async function handleTelegramTargetListClick(event) {
+  const testButton = event.target.closest("[data-telegram-target-test]");
+  if (testButton) {
+    await sendTelegramTest({ currentTarget: testButton });
+    return;
+  }
   const button = event.target.closest("[data-remove-telegram-target]");
   if (!button) return;
   telegramTargets = telegramTargets.filter((target) => target.id !== button.dataset.removeTelegramTarget);
@@ -436,6 +443,7 @@ function renderTelegramTargets() {
     empty.className = "config-description telegram-target-empty";
     empty.textContent = "还没有添加接收目标。";
     list.appendChild(empty);
+    syncTelegramSetupVisibility();
     return;
   }
   telegramTargets.forEach((target) => {
@@ -445,7 +453,7 @@ function renderTelegramTargets() {
     const label = document.createElement("span");
     label.textContent = target.type === "direct"
       ? `${target.name} · 频道 Direct`
-      : `${target.name} · 个人聊天 · ${target.chatId}`;
+      : `${target.name} · 个人聊天`;
     const controls = document.createElement("div");
     controls.className = "telegram-target-controls";
     const toggleLabel = document.createElement("label");
@@ -470,27 +478,28 @@ function renderTelegramTargets() {
     remove.type = "button";
     remove.textContent = "移除";
     remove.dataset.removeTelegramTarget = target.id;
-    controls.append(toggleLabel, remove);
+    const test = document.createElement("button");
+    test.type = "button";
+    test.textContent = "测试";
+    test.dataset.telegramTargetTest = target.id;
+    controls.append(test, toggleLabel, remove);
     item.append(label, controls);
     list.appendChild(item);
   });
+  syncTelegramSetupVisibility();
 }
 
 function syncTelegramTargetFields() {
   const isDirect = document.querySelector("#telegramTargetType").value === "direct";
-  document.querySelector("#telegramTargetChatIdLabel").textContent = isDirect
-    ? "频道分享链接"
-    : "个人 Chat ID";
-  document.querySelector("#telegramTargetChatId").placeholder = isDirect
-    ? "https://t.me/channel"
-    : "点击上方按钮后等待 /start 自动填入";
-  document.querySelector("#telegramDirectTopicPickerField").hidden = !isDirect;
-  document.querySelector("#telegramPersonalTargetHelp").hidden = isDirect;
-  document.querySelector("#telegramDirectTargetHelp").hidden = !isDirect;
-  document.querySelector("#telegramPersonalBotStart").hidden = isDirect;
-  document.querySelector("#telegramTargetActionHint").textContent = isDirect
-    ? "选好接收通知的小号对话后，添加到下方目标列表。"
-    : "点上方按钮开始监听；收到 /start 后自动填入 Chat ID。";
+  document.querySelector("#telegramDirectFields").hidden = !isDirect;
+  document.querySelector("#openTelegramBot").hidden = isDirect;
+}
+
+function syncTelegramSetupVisibility() {
+  const hasToken = Boolean(document.querySelector("#telegramBotToken").value.trim());
+  document.querySelector("#telegramProtectedSettings").hidden = !hasToken;
+  document.querySelector("#telegramTargetDependentSettings").hidden = !hasToken
+    || !telegramTargets.some((target) => String(target?.chatId || "").trim());
 }
 
 function normalizeTelegramChannelInput(value) {
@@ -548,20 +557,45 @@ function handleTelegramChannelInput() {
   document.querySelector("#telegramDirectTopicPickerLabel").textContent = "读取可用接收对话";
 }
 
-async function fillPendingTelegramPersonalChatId() {
-  if (document.querySelector("#telegramTargetType").value !== "personal") return;
-  const config = await chrome.storage.local.get("telegramPendingPersonalChatId");
-  const chatId = String(config.telegramPendingPersonalChatId || "");
-  if (chatId) document.querySelector("#telegramTargetChatId").value = chatId;
+async function ensureTelegramPersonalTarget(value, targetName = "个人聊天", notify = false) {
+  const chatId = String(value || "").trim();
+  if (!chatId) return;
+  const stored = await chrome.storage.local.get({ telegramTargets: [] });
+  telegramTargets = normalizeTelegramTargets(stored.telegramTargets);
+  let added = false;
+  if (!telegramTargets.some((target) => target.type === "personal" && target.chatId === chatId)) {
+    if (telegramTargets.length >= 10) {
+      if (notify) showToast("推送目标已满，无法添加这个聊天", "error");
+      return;
+    }
+    telegramTargets.push({
+      id: crypto.randomUUID(),
+      name: String(targetName || "个人聊天").trim().slice(0, 40) || "个人聊天",
+      type: "personal",
+      chatId,
+      topicId: "",
+      channelChatId: "",
+      enabled: true
+    });
+    added = true;
+  }
+  await chrome.storage.local.set({ telegramTargets });
+  await chrome.storage.local.remove(["telegramPendingPersonalChatId", "telegramPendingPersonalTargetName"]);
+  renderTelegramTargets();
+  if (notify) showToast(added ? "已收到 /start，接收目标已添加" : "这个聊天已在推送目标中");
 }
 
-function applyTelegramDetectedChatId(value) {
-  if (document.querySelector("#telegramTargetType").value !== "personal") return;
-  const input = document.querySelector("#telegramTargetChatId");
-  const chatId = String(value || "");
-  if (!chatId || input.value === chatId) return;
-  input.value = chatId;
-  showToast("已收到机器人 /start，Chat ID 已自动填入");
+async function applyTelegramDetectedChatId(message) {
+  await restoreTelegramConfig();
+  if (message?.targetAdded === false) {
+    if (message.alreadyExists) {
+      showToast("这个聊天已在推送目标中");
+      return;
+    }
+    showToast(message.error || "已收到 /start，但无法添加接收目标", "error");
+    return;
+  }
+  showToast("已收到 /start，接收目标已添加");
 }
 
 async function toggleTelegramDirectTopicPicker() {
@@ -615,15 +649,12 @@ async function loadTelegramDirectTopics({ nextPage = false } = {}) {
     }
     selectedTelegramDirectTopic = null;
     renderTelegramDirectTopicMenu();
-    document.querySelector("#telegramDirectTopicPickerLabel").textContent =
-      telegramDirectTopics.length > 0
-        ? `已读取 ${telegramDirectTopics.length} 个会话，点击选择`
-        : "本批没有接收对话，可继续读取下一批";
+    document.querySelector("#telegramDirectTopicPickerLabel").textContent = telegramDirectTopics.length > 0
+      ? "选择通知接收对话"
+      : "没有找到接收对话";
     document.querySelector("#telegramDirectTopicMenu").hidden = false;
     button.setAttribute("aria-expanded", "true");
-    showToast(telegramDirectTopics.length > 0
-      ? `本次检查 ${response.result?.updatesRead || 0} 条更新，找到 ${telegramDirectTopics.length} 个接收对话`
-      : response.result?.message || "本批没有接收对话，可继续读取下一批");
+    if (telegramDirectTopics.length === 0) showToast(response.result?.message || "没有找到接收对话");
   } catch (error) {
     if (!nextPage) {
       telegramDirectTopics = [];
@@ -635,8 +666,8 @@ async function loadTelegramDirectTopics({ nextPage = false } = {}) {
     document.querySelector("#telegramDirectTopicMenu").hidden = !canContinue;
     button.setAttribute("aria-expanded", String(canContinue));
     document.querySelector("#telegramDirectTopicPickerLabel").textContent = telegramDirectTopics.length > 0
-      ? `已读取 ${telegramDirectTopics.length} 个会话`
-      : "读取失败或本批没有接收对话";
+      ? "选择通知接收对话"
+      : "选择通知接收对话";
     showToast(formatToastError(error, "请检查频道分享链接，并确认频道创建者以外的 Telegram 账号已向频道 Direct 发过消息"), "error");
   } finally {
     button.disabled = false;
@@ -666,7 +697,7 @@ function renderTelegramDirectTopicMenu() {
   });
 }
 
-function handleTelegramDirectTopicMenuClick(event) {
+async function handleTelegramDirectTopicMenuClick(event) {
   if (event.target.closest("[data-next-telegram-direct-topics]")) {
     loadTelegramDirectTopics({ nextPage: true });
     return;
@@ -681,32 +712,7 @@ function handleTelegramDirectTopicMenuClick(event) {
       || (selectedTelegramDirectTopic.topicUsername ? `@${selectedTelegramDirectTopic.topicUsername}` : "Direct 会话");
   document.querySelector("#telegramDirectTopicMenu").hidden = true;
   document.querySelector("#telegramDirectTopicPickerButton").setAttribute("aria-expanded", "false");
-}
-
-function handleTelegramTargetTypeChange() {
-  const isDirect = document.querySelector("#telegramTargetType").value === "direct";
-  telegramDirectTopics = [];
-  telegramDirectNextOffset = null;
-  selectedTelegramDirectTopic = null;
-  document.querySelector("#telegramDirectTopicMenu").hidden = true;
-  document.querySelector("#telegramDirectTopicPickerButton").setAttribute("aria-expanded", "false");
-  document.querySelector("#telegramDirectTopicPickerLabel").textContent = "读取可用接收对话";
-  if (isDirect && !document.querySelector("#telegramTargetChatId").value.trim()) {
-    const savedTarget = telegramTargets.find((target) => target.type === "direct" && target.channelChatId);
-    if (savedTarget) document.querySelector("#telegramTargetChatId").value = savedTarget.channelChatId;
-  }
-  syncTelegramTargetFields();
-}
-
-function handleTelegramChannelInput() {
-  if (document.querySelector("#telegramTargetType").value !== "direct") return;
-  telegramDirectTopics = [];
-  telegramDirectNextOffset = null;
-  selectedTelegramDirectTopic = null;
-  renderTelegramDirectTopicMenu();
-  document.querySelector("#telegramDirectTopicMenu").hidden = true;
-  document.querySelector("#telegramDirectTopicPickerButton").setAttribute("aria-expanded", "false");
-  document.querySelector("#telegramDirectTopicPickerLabel").textContent = "读取可用接收对话";
+  await addTelegramTarget();
 }
 
 function closeTelegramDirectTopicMenuOutside(event) {
@@ -718,7 +724,7 @@ function closeTelegramDirectTopicMenuOutside(event) {
 
 function parseTelegramKeywordRules(value) {
   return String(value || "").split(/\r?\n/)
-    .map((line) => line.split(/[,，]/).map((term) => term.trim()).filter(Boolean))
+    .map((line) => line.split(/[,，\s]+|和/g).map((term) => term.trim()).filter(Boolean))
     .filter((terms) => terms.length > 0)
     .map((terms) => ({ terms, enabled: true }));
 }
@@ -749,6 +755,11 @@ function addTelegramKeywordRule() {
     excludeTerms
   }));
   if (additions.length === 0) return;
+  const editingRule = telegramKeywordRules.find((rule) => rule.id === telegramKeywordEditingRuleId);
+  if (editingRule && additions.length !== 1) {
+    showToast("编辑时一次只能修改一条规则", "error");
+    return;
+  }
   const hasConflictingTerms = additions.some((rule) => {
     const excluded = new Set(rule.excludeTerms.map((term) => term.toLocaleLowerCase()));
     return rule.terms.some((term) => excluded.has(term.toLocaleLowerCase()));
@@ -757,18 +768,43 @@ function addTelegramKeywordRule() {
     showToast("同一关键词不能同时作为命中词和排除词", "error");
     return;
   }
-  const existing = new Set(telegramKeywordRules.map(getTelegramKeywordRuleIdentity));
-  additions.forEach((rule) => {
-    const key = getTelegramKeywordRuleIdentity(rule);
-    if (!existing.has(key)) {
-      telegramKeywordRules.push({ ...rule, id: crypto.randomUUID(), enabled: true });
-      existing.add(key);
+  if (editingRule) {
+    const duplicate = telegramKeywordRules.some((rule) => {
+      return rule.id !== editingRule.id
+        && getTelegramKeywordRuleIdentity(rule) === getTelegramKeywordRuleIdentity(additions[0]);
+    });
+    if (duplicate) {
+      showToast("相同规则已存在", "error");
+      return;
     }
-  });
-  input.value = "";
-  document.querySelector("#telegramKeywordExcludeInput").value = "";
+    Object.assign(editingRule, {
+      terms: additions[0].terms,
+      mode: additions[0].mode,
+      excludeTerms: additions[0].excludeTerms
+    });
+  } else {
+    const existing = new Set(telegramKeywordRules.map(getTelegramKeywordRuleIdentity));
+    additions.forEach((rule) => {
+      const key = getTelegramKeywordRuleIdentity(rule);
+      if (!existing.has(key)) {
+        telegramKeywordRules.push({ ...rule, id: crypto.randomUUID(), enabled: true });
+        existing.add(key);
+      }
+    });
+  }
+  setTelegramKeywordEditingRule(null);
   renderTelegramKeywordRules();
   persistTelegramKeywordRules();
+}
+
+function setTelegramKeywordEditingRule(rule) {
+  telegramKeywordEditingRuleId = rule?.id || "";
+  document.querySelector("#telegramKeywordInput").value = rule?.terms.join(", ") || "";
+  document.querySelector("#telegramKeywordExcludeInput").value = rule?.excludeTerms.join(", ") || "";
+  document.querySelector("#telegramKeywordMode").value = rule?.mode === "any" ? "any" : "all";
+  const button = document.querySelector("#addTelegramKeyword");
+  button.textContent = rule ? "修改" : "添加";
+  button.title = rule ? "保存对这条规则的修改" : "添加关键词规则";
 }
 
 function getTelegramKeywordRuleIdentity(rule) {
@@ -784,8 +820,9 @@ function renderTelegramKeywordRules() {
   list.replaceChildren();
   telegramKeywordRules.forEach((rule) => {
     const item = document.createElement("li");
-    item.className = `telegram-keyword-rule${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}`;
+    item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}`;
     item.dataset.telegramRuleId = rule.id;
+    item.title = "点击卡片编辑规则";
     const enabledLabel = document.createElement("label");
     enabledLabel.className = "telegram-keyword-toggle";
     const enabled = document.createElement("input");
@@ -850,10 +887,20 @@ function handleTelegramKeywordRuleChange(event) {
 
 function handleTelegramKeywordRuleClick(event) {
   const button = event.target.closest("[data-remove-telegram-rule]");
-  if (!button) return;
-  telegramKeywordRules = telegramKeywordRules.filter((rule) => rule.id !== button.dataset.removeTelegramRule);
-  renderTelegramKeywordRules();
-  persistTelegramKeywordRules();
+  if (button) {
+    const removedRuleId = button.dataset.removeTelegramRule;
+    telegramKeywordRules = telegramKeywordRules.filter((rule) => rule.id !== removedRuleId);
+    if (telegramKeywordEditingRuleId === removedRuleId) setTelegramKeywordEditingRule(null);
+    renderTelegramKeywordRules();
+    persistTelegramKeywordRules();
+    return;
+  }
+  if (event.target.closest("button, input, label")) return;
+  const item = event.target.closest("[data-telegram-rule-id]");
+  const rule = telegramKeywordRules.find((entry) => entry.id === item?.dataset.telegramRuleId);
+  if (!rule) return;
+  setTelegramKeywordEditingRule(rule);
+  document.querySelector("#telegramKeywordInput").focus();
 }
 
 async function persistTelegramKeywordRules() {
@@ -871,7 +918,7 @@ function getSelectedTelegramBoards() {
 }
 
 function parseTelegramTextList(value) {
-  return [...new Set(String(value || "").split(/[\r\n,，]+/).map((term) => term.trim()).filter(Boolean))];
+  return [...new Set(String(value || "").split(/[,，\s]+|和/g).map((term) => term.trim()).filter(Boolean))];
 }
 
 function normalizeTelegramTargets(value) {
@@ -897,32 +944,36 @@ async function toggleTelegramPause() {
 }
 
 function renderTelegramMonitorStatus(config) {
-  const status = document.querySelector("#telegramMonitorStatus");
-  const enabled = config.telegramMessageNotificationsEnabled || config.telegramPostNotificationsEnabled;
-  const targetReady = telegramTargets.some((target) => target.enabled !== false && target.chatId);
-  const state = config.telegramMonitorPaused ? "已暂停"
-    : enabled && targetReady ? "监控中（浏览器需保持运行）" : "未启用";
-  const lastCheck = Number(config.telegramMonitorLastCheck) > 0
-    ? new Date(config.telegramMonitorLastCheck).toLocaleString()
-    : "尚无检查记录";
-  status.textContent = `状态：${state}；上次检查：${lastCheck}${config.telegramMonitorLastError ? `；错误：${config.telegramMonitorLastError}` : ""}`;
   document.querySelector("#toggleTelegramPause").textContent = config.telegramMonitorPaused ? "恢复监控" : "暂停监控";
 }
 
 function renderTelegramHistory(history) {
   const list = document.querySelector("#telegramRssHistory");
+  const actions = document.querySelector(".telegram-history-actions");
   list.replaceChildren();
   const entries = Array.isArray(history) ? history.slice(0, 20) : [];
+  actions.hidden = entries.length === 0;
   if (entries.length === 0) {
+    selectedTelegramHistoryKeys.clear();
     const empty = document.createElement("li");
     empty.className = "config-description";
-    empty.textContent = "暂无新帖推送记录";
+    empty.textContent = "暂无推送记录";
     list.appendChild(empty);
+    updateTelegramHistoryActions();
     return;
   }
-  entries.forEach((entry) => {
+  entries.forEach((entry, index) => {
     const item = document.createElement("li");
-    item.className = "telegram-target-item";
+    item.className = "telegram-history-item";
+    const key = getTelegramHistoryKey(entry, index);
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedTelegramHistoryKeys.has(key);
+    checkbox.dataset.telegramHistoryKey = key;
+    checkbox.setAttribute("aria-label", `选择${entry.title || "推送记录"}`);
+    const checkWrap = document.createElement("label");
+    checkWrap.className = "telegram-history-check";
+    checkWrap.append(checkbox);
     const link = document.createElement("a");
     try {
       const url = new URL(entry.link);
@@ -934,9 +985,91 @@ function renderTelegramHistory(history) {
       link.removeAttribute("href");
     }
     link.textContent = `${entry.title || "NodeSeek 帖子"} · ${entry.notifiedAt ? new Date(entry.notifiedAt).toLocaleString() : ""}`;
-    item.appendChild(link);
+    item.append(checkWrap, link);
     list.appendChild(item);
   });
+  updateTelegramHistoryActions();
+}
+
+function getTelegramHistoryKey(entry) {
+  return `${String(entry?.link || "")}|${String(entry?.notifiedAt || "")}|${String(entry?.title || "")}`;
+}
+
+function updateTelegramHistoryActions() {
+  document.querySelector("#telegramHistoryDeleteSelected").disabled = selectedTelegramHistoryKeys.size === 0;
+}
+
+function handleTelegramHistorySelectionChange(event) {
+  const checkbox = event.target.closest("[data-telegram-history-key]");
+  if (!checkbox) return;
+  if (checkbox.checked) selectedTelegramHistoryKeys.add(checkbox.dataset.telegramHistoryKey);
+  else selectedTelegramHistoryKeys.delete(checkbox.dataset.telegramHistoryKey);
+  updateTelegramHistoryActions();
+}
+
+async function selectAllTelegramHistory() {
+  const stored = await chrome.storage.local.get({ telegramRssHistory: [] });
+  selectedTelegramHistoryKeys = new Set((Array.isArray(stored.telegramRssHistory) ? stored.telegramRssHistory : [])
+    .slice(0, 20).map((entry) => getTelegramHistoryKey(entry)));
+  renderTelegramHistory(stored.telegramRssHistory);
+}
+
+function clearTelegramHistorySelection() {
+  selectedTelegramHistoryKeys.clear();
+  chrome.storage.local.get({ telegramRssHistory: [] }).then((stored) => renderTelegramHistory(stored.telegramRssHistory));
+}
+
+async function deleteSelectedTelegramHistory() {
+  if (selectedTelegramHistoryKeys.size === 0) return;
+  const stored = await chrome.storage.local.get({ telegramRssHistory: [] });
+  const entries = Array.isArray(stored.telegramRssHistory) ? stored.telegramRssHistory : [];
+  const retained = entries.filter((entry) => !selectedTelegramHistoryKeys.has(getTelegramHistoryKey(entry)));
+  selectedTelegramHistoryKeys.clear();
+  await chrome.storage.local.set({ telegramRssHistory: retained });
+  renderTelegramHistory(retained);
+}
+
+async function resetTelegramHistory() {
+  selectedTelegramHistoryKeys.clear();
+  await chrome.storage.local.set({ telegramRssHistory: [] });
+  renderTelegramHistory([]);
+}
+
+async function resetTelegramConfig() {
+  const telegramKeys = [
+    "telegramMessageNotificationsEnabled", "telegramPostNotificationsEnabled", "telegramBotToken", "telegramTargets",
+    "telegramChatId", "telegramKeywordRules", "telegramBlockedKeywords", "telegramBoardSlugs",
+    "telegramMessageCursors", "telegramRssSeenIds", "telegramRssInitialized", "telegramRssHistory",
+    "telegramMonitorPaused", "telegramMonitorLastCheck", "telegramMonitorLastError",
+    "telegramPendingDirectTopics", "telegramPendingPersonalChatId", "telegramPendingPersonalTargetName",
+    "telegramPersonalStartWatchUntil", "telegramPersonalStartWatchSince", "telegramPersonalStartOffset",
+    "telegramPersonalStartRepliedUpdateId", "telegramPendingPersonalStartUpdateId"
+  ];
+  try {
+    await chrome.runtime.sendMessage({ type: "telegram:stopPersonalStartWatch" }).catch(() => {});
+    await chrome.storage.local.remove(telegramKeys);
+    selectedTelegramHistoryKeys.clear();
+    document.querySelector("#telegramBotToken").value = "";
+    document.querySelector("#telegramTargetName").value = "NodeSeeker 通知";
+    document.querySelector("#telegramTargetChatId").value = "";
+    document.querySelector("#telegramTargetType").value = "personal";
+    document.querySelector("#telegramMessageNotificationsEnabled").checked = true;
+    document.querySelector("#telegramPostNotificationsEnabled").checked = true;
+    document.querySelector("#telegramBlockedKeywords").value = "";
+    document.querySelectorAll("[data-telegram-board]").forEach((input) => { input.checked = true; });
+    telegramTargets = [];
+    telegramKeywordRules = [];
+    setTelegramKeywordEditingRule(null);
+    renderTelegramKeywordRules();
+    renderTelegramTargets();
+    renderTelegramHistory([]);
+    syncTelegramTargetFields();
+    syncTelegramSetupVisibility();
+    renderTelegramMonitorStatus({ telegramMonitorPaused: false });
+    showToast("Telegram 配置已恢复默认");
+  } catch (error) {
+    showToast(formatToastError(error, "恢复 Telegram 默认配置失败"), "error");
+  }
 }
 
 function handleShortcutInputKeyDown(event) {

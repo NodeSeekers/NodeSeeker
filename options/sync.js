@@ -132,7 +132,6 @@ function normalizeSyncConfigOptions(value) {
   return {
     ...options,
     apiKey: normalizeSyncString(options.apiKey, ""),
-    uploadEndpoint: normalizeSyncString(options.uploadEndpoint, SYNC_CONFIG_DEFAULTS.uploadEndpoint),
     uploadFieldName: normalizeSyncString(options.uploadFieldName, SYNC_CONFIG_DEFAULTS.uploadFieldName),
     markdownAltText: normalizeSyncString(options.markdownAltText, SYNC_CONFIG_DEFAULTS.markdownAltText)
   };

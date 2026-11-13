@@ -28,6 +28,8 @@ test("configuration backups include editable Telegram settings", () => {
   ].join("\n"), sandbox);
 
   const defaults = vm.runInContext("SYNC_CONFIG_DEFAULTS", sandbox);
+  expect(defaults.telegramMessageNotificationsEnabled).toBe(true);
+  expect(defaults.telegramPostNotificationsEnabled).toBe(true);
   expect(Object.keys(defaults)).toEqual(expect.arrayContaining([
     "followRules",
     "telegramMessageNotificationsEnabled",

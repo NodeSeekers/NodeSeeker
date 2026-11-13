@@ -40,14 +40,11 @@ const DEFAULT_FOLLOW_RULES = {
 };
 const DEFAULT_OPTIONS = {
   imageUploadEnabled: true,
-  uploadEndpoint: "https://api.nodeimage.com/api/upload",
-  uploadFieldName: "image",
-  apiKey: "",
-  markdownAltText: "image",
   userStatsEnabled: true,
   profileTrend7DaysEnabled: true,
   profileTrend30DaysEnabled: true,
   profileHoverSignatureEnabled: true,
+  profileHoverTrendEnabled: false,
   userCacheHours: 24,
   profileRetentionDays: 0,
   blockFilterEnabled: true,
@@ -60,7 +57,6 @@ const DEFAULT_OPTIONS = {
   attendanceReminderEnabled: true,
   autoAttendanceEnabled: false,
   autoAttendanceMode: "random",
-  linkPurifierEnabled: true,
   imagePreviewEnabled: true,
   messageEntryEnabled: true,
   editorToolsEnabled: true,

@@ -6,7 +6,6 @@ importScripts(
   "background/profile-store.js",
   "background/lucky-notifications.js",
   "background/telegram-notifications.js",
-  "background/link-purifier.js",
   "background/attendance.js",
   "background/preloaded-config.js",
   "background/visit-history.js",

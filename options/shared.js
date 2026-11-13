@@ -41,6 +41,7 @@ const DEFAULT_OPTIONS = {
   profileTrend7DaysEnabled: true,
   profileTrend30DaysEnabled: true,
   profileHoverSignatureEnabled: true,
+  profileHoverTrendEnabled: false,
   userCacheHours: 24,
   profileRetentionDays: 0,
   blockFilterEnabled: true,
@@ -53,7 +54,6 @@ const DEFAULT_OPTIONS = {
   attendanceReminderEnabled: true,
   autoAttendanceEnabled: false,
   autoAttendanceMode: "random",
-  linkPurifierEnabled: true,
   imagePreviewEnabled: true,
   messageEntryEnabled: true,
   editorToolsEnabled: true,
@@ -71,8 +71,8 @@ const DEFAULT_OPTIONS = {
   levelColors: DEFAULT_LEVEL_COLORS
 };
 const TELEGRAM_SYNC_CONFIG_DEFAULTS = {
-  telegramMessageNotificationsEnabled: false,
-  telegramPostNotificationsEnabled: false,
+  telegramMessageNotificationsEnabled: true,
+  telegramPostNotificationsEnabled: true,
   telegramMonitorPaused: false,
   telegramBotToken: "",
   telegramTargets: [],
@@ -83,7 +83,6 @@ const TELEGRAM_SYNC_CONFIG_DEFAULTS = {
 const SYNC_CONFIG_DEFAULTS = {
   ...DEFAULT_OPTIONS,
   ...TELEGRAM_SYNC_CONFIG_DEFAULTS,
-  uploadEndpoint: "https://api.nodeimage.com/api/upload",
   uploadFieldName: "image",
   markdownAltText: "image"
 };

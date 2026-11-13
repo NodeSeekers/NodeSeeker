@@ -23,7 +23,6 @@
     "attendanceReminderEnabled": true,
     "autoAttendanceEnabled": false,
     "autoAttendanceMode": "random",
-    "linkPurifierEnabled": true,
     "imagePreviewEnabled": true,
     "messageEntryEnabled": true,
     "editorToolsEnabled": true,
@@ -65,7 +64,6 @@
     "telegramKeywordRules": [],
     "telegramBlockedKeywords": [],
     "telegramBoardSlugs": [],
-    "uploadEndpoint": "https://api.nodeimage.com/api/upload",
     "uploadFieldName": "image",
     "markdownAltText": "image"
   }

@@ -20,13 +20,15 @@ async function uploadImage(payload) {
   const formData = new FormData();
   formData.append(options.uploadFieldName || DEFAULT_OPTIONS.uploadFieldName, file, fileName);
 
-  const uploadUrl = withApiKey(options.uploadEndpoint, options.apiKey.trim());
-  const response = await fetch(uploadUrl, {
+  const response = await fetch(DEFAULT_OPTIONS.uploadEndpoint, {
     method: "POST",
     headers: {
-      "Accept": "application/json"
+      "Accept": "application/json",
+      "X-API-Key": options.apiKey.trim()
     },
-    body: formData
+    body: formData,
+    credentials: "omit",
+    redirect: "error"
   });
 
   const responseText = await response.text();
@@ -45,12 +47,6 @@ async function uploadImage(payload) {
     imageUrl,
     markdown: `![${options.markdownAltText || DEFAULT_OPTIONS.markdownAltText}](${imageUrl})`
   };
-}
-
-function withApiKey(endpoint, apiKey) {
-  const url = new URL(endpoint);
-  url.searchParams.set("api_key", apiKey);
-  return url.toString();
 }
 
 function dataUrlToBlob(dataUrl) {

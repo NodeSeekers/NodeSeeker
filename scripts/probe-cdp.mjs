@@ -52,7 +52,7 @@ try {
     const state = await chrome.storage.local.get([
       "quickReplyShortcut", "readingNavigationEnabled", "autoPageEnabled", "autoPageAppendEnabled", "apiKey",
       "telegramMessageNotificationsEnabled", "telegramPostNotificationsEnabled", "autoAttendanceEnabled",
-      "autoAttendanceMode", "profileHoverSignatureEnabled", "imagePreviewEnabled", "linkPurifierEnabled"
+      "autoAttendanceMode", "profileHoverSignatureEnabled", "imagePreviewEnabled"
     ]);
     return {
       id: chrome.runtime.id,
@@ -67,8 +67,7 @@ try {
       autoAttendanceEnabled: Boolean(state.autoAttendanceEnabled),
       autoAttendanceMode: state.autoAttendanceMode || "random",
       profileHoverSignatureEnabled: state.profileHoverSignatureEnabled !== false,
-      imagePreviewEnabled: state.imagePreviewEnabled !== false,
-      linkPurifierEnabled: state.linkPurifierEnabled !== false
+      imagePreviewEnabled: state.imagePreviewEnabled !== false
     };
   });
   console.log(JSON.stringify({ label: "extension-state", ...report.extension }));

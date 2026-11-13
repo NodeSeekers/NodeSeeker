@@ -24,6 +24,7 @@ const TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY = "telegramPersonalStartRepl
 const TELEGRAM_PERSONAL_START_OFFSET_KEY = "telegramPersonalStartOffset";
 const TELEGRAM_PENDING_DIRECT_TOPICS_KEY = "telegramPendingDirectTopics";
 const TELEGRAM_PENDING_PERSONAL_CHAT_ID_KEY = "telegramPendingPersonalChatId";
+const TELEGRAM_PENDING_PERSONAL_TARGET_NAME_KEY = "telegramPendingPersonalTargetName";
 let telegramPersonalStartCheckInFlight = false;
 let telegramMonitorCheckInFlight = false;
 const TELEGRAM_DIRECT_MESSAGE_URL = "https://www.nodeseek.com/notification#/message?mode=list";
@@ -349,11 +350,11 @@ async function sendTelegramTestMessage(targetId = "") {
     [TELEGRAM_KEYS.targets]: []
   });
   const targets = (Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [])
-    .filter((target) => target?.enabled !== false && target.chatId);
-  const selectedTargets = targetId ? targets.filter((target) => target.id === targetId) : targets;
+    .filter((target) => target?.chatId && (targetId ? target.id === targetId : target.enabled !== false));
+  const selectedTargets = targets;
   if (selectedTargets.length === 0) throw new Error("请先添加并保存一个有效的 Telegram 推送目标");
   for (const target of selectedTargets) {
-    await sendTelegramMessage(config[TELEGRAM_KEYS.token], target, "NodeSeek Helper 测试通知已成功发送。");
+    await sendTelegramMessage(config[TELEGRAM_KEYS.token], target, "NodeSeeker 测试成功");
   }
   return { message: `测试通知已发送到 ${selectedTargets.length} 个目标` };
 }
@@ -433,6 +434,11 @@ async function startTelegramPersonalStartWatch() {
   });
 }
 
+async function stopTelegramPersonalStartWatch() {
+  await chrome.alarms.clear(TELEGRAM_PERSONAL_START_ALARM_NAME);
+  await chrome.storage.local.set({ [TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]: 0 });
+}
+
 async function checkTelegramPersonalStartWatch() {
   if (telegramPersonalStartCheckInFlight) return;
   telegramPersonalStartCheckInFlight = true;
@@ -498,20 +504,48 @@ async function registerTelegramPersonalStartUpdate(token, update) {
   const updateId = Number(update.update_id) || 0;
   if (!chatId || !updateId) return;
 
-  const state = await chrome.storage.local.get(TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY);
+  const state = await chrome.storage.local.get({
+    [TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]: 0,
+    [TELEGRAM_KEYS.targets]: [],
+    [TELEGRAM_PENDING_PERSONAL_TARGET_NAME_KEY]: "个人聊天"
+  });
   const lastRepliedUpdateId = Number(state[TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]) || 0;
+  const targets = Array.isArray(state[TELEGRAM_KEYS.targets]) ? [...state[TELEGRAM_KEYS.targets]] : [];
+  const existingTarget = targets.find((target) => target?.type !== "direct" && String(target?.chatId || "") === chatId);
+  const targetAdded = Boolean(existingTarget) || targets.length < 10;
+  const targetName = String(state[TELEGRAM_PENDING_PERSONAL_TARGET_NAME_KEY] || "个人聊天").trim().slice(0, 40) || "个人聊天";
+  if (!existingTarget && targetAdded) {
+    targets.push({
+      id: crypto.randomUUID(),
+      name: targetName,
+      type: "personal",
+      chatId,
+      topicId: "",
+      channelChatId: "",
+      enabled: true
+    });
+  }
   await chrome.storage.local.set({
-    [TELEGRAM_PENDING_PERSONAL_CHAT_ID_KEY]: chatId,
+    [TELEGRAM_KEYS.targets]: targets,
     telegramPendingPersonalStartUpdateId: updateId,
     [TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]: 0
   });
+  await chrome.storage.local.remove([TELEGRAM_PENDING_PERSONAL_CHAT_ID_KEY, TELEGRAM_PENDING_PERSONAL_TARGET_NAME_KEY]);
   await chrome.alarms.clear(TELEGRAM_PERSONAL_START_ALARM_NAME);
-  chrome.runtime.sendMessage({ type: "telegram:personalChatIdDetected", chatId }).catch(() => {});
+  chrome.runtime.sendMessage({
+    type: "telegram:personalChatIdDetected",
+    chatId,
+    targetAdded: !existingTarget && targetAdded,
+    alreadyExists: Boolean(existingTarget),
+    error: targetAdded ? "" : "推送目标已满，无法添加这个聊天"
+  }).catch(() => {});
 
   if (updateId <= lastRepliedUpdateId) return;
   try {
-    await sendTelegramMessage(token, { type: "personal", chatId },
-      "已收到 /start，Chat ID 已自动填入插件设置。请返回插件点击“添加目标”。");
+    const reply = targetAdded
+      ? existingTarget ? "这个聊天已在插件的推送目标中。" : "已收到 /start，接收目标已添加到插件设置。"
+      : "推送目标已满，请返回插件移除一个目标后重试。";
+    await sendTelegramMessage(token, { type: "personal", chatId }, reply);
     await chrome.storage.local.set({ [TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]: updateId });
   } catch (error) {
     chrome.runtime.sendMessage({

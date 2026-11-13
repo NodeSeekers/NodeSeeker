@@ -25,7 +25,8 @@ try {
   originalRules = original.telegramKeywordRules;
   await page.locator('[data-panel-target="telegram-panel"]').click();
   await page.locator("#telegramConfigGroup").waitFor();
-  await page.waitForFunction(() => document.querySelector("#telegramMonitorStatus")?.textContent.includes("；上次检查："));
+  await page.waitForFunction(() => document.querySelector("#telegramConfigGroup")
+    && typeof syncTelegramSetupVisibility === "function");
   const groupParent = await page.locator("#telegramConfigGroup").evaluate((node) => node.parentElement.id);
   if (groupParent !== "telegram-panel") throw new Error("Telegram controls are not inside their top-level panel");
 

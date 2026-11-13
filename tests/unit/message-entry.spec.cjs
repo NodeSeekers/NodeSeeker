@@ -27,6 +27,36 @@ test("message preview falls back to the message list without a user ID", () => {
   expect(buildMessageUrl({})).toBe("/notification#/message?mode=list");
 });
 
+test("private message preview keeps incoming messages and hides messages sent by the current user", () => {
+  const entries = [
+    { id: "incoming", sender_id: "222", receiver_id: "777" },
+    { id: "outgoing", sender_id: "777", receiver_id: "222" },
+    { id: "self", sender_id: "777", receiver_id: "777" }
+  ];
+  const sandbox = loadHelpers();
+  const visibleIds = vm.runInContext(
+    `filterIncomingNotificationMessages(${JSON.stringify(entries)}, "777").map((entry) => entry.id)`,
+    sandbox
+  );
+
+  expect(Array.from(visibleIds)).toEqual(["incoming"]);
+});
+
+test("private message preview reads the current user ID from the sidebar profile link", () => {
+  const sandbox = vm.createContext({
+    URL,
+    location: { origin: "https://www.nodeseek.com" },
+    document: {
+      querySelector: (selector) => selector === "#nsk-right-panel-container .user-card:not(.hover-user-card) a[href^='/space/']"
+        ? { getAttribute: () => "/space/777" }
+        : null
+    }
+  });
+  vm.runInContext(source, sandbox);
+
+  expect(vm.runInContext("getNotificationPreviewCurrentUserId()", sandbox)).toBe("777");
+});
+
 test("reply preview opens the page containing its target floor", () => {
   expect(buildPostUrl({ post_id: 9876, comment_id: 456, floor_id: 15 }))
     .toBe("https://www.nodeseek.com/post-9876-2?nshComment=456&nshFloor=15");

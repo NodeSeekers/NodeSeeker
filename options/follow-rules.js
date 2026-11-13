@@ -411,6 +411,7 @@ function openFollowRuleEditor(type, groupId = "") {
     type,
     groupId,
     ruleMode: "all",
+    editingRuleId: "",
     group: cloneFollowRuleGroup(type, source)
   };
   const config = FOLLOW_RULE_TYPE_CONFIG[type];
@@ -593,13 +594,19 @@ function createFollowRuleKeywordEditor(group) {
   entry.className = "follow-rule-keyword-entry";
   const keywordInput = createFollowRuleKeywordInput("items", "命中词，例如：台湾, 家宽");
   const excludeInput = createFollowRuleKeywordInput("excludeItems", "排除词，例如：已出, 求购");
-  const matchMode = createFollowRuleMatchModeSelect(pendingFollowRuleEditor.ruleMode, (value) => {
+  const editingRule = group.rules.find((rule) => rule.id === pendingFollowRuleEditor.editingRuleId);
+  if (editingRule) {
+    keywordInput.value = editingRule.terms.join(", ");
+    excludeInput.value = editingRule.excludeTerms.join(", ");
+    pendingFollowRuleEditor.ruleMode = editingRule.mode;
+  }
+  const matchMode = createFollowRuleMatchModeSelect(editingRule?.mode || pendingFollowRuleEditor.ruleMode, (value) => {
     pendingFollowRuleEditor.ruleMode = value;
   });
   const addButton = document.createElement("button");
   addButton.type = "button";
-  addButton.textContent = "添加";
-  addButton.title = "将命中词和排除词作为一条独立规则添加";
+  addButton.textContent = editingRule ? "修改" : "添加";
+  addButton.title = editingRule ? "保存对这条规则的修改" : "将命中词和排除词作为一条独立规则添加";
   addButton.addEventListener("click", addPendingFollowRuleItems);
   [keywordInput, excludeInput].forEach((input) => input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -628,8 +635,18 @@ function createFollowRuleKeywordRuleList(group) {
 
 function createFollowRuleKeywordRuleCard(rule) {
   const item = document.createElement("li");
-  item.className = `telegram-keyword-rule${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}`;
+  item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}`;
   item.dataset.followRuleKeywordRuleId = rule.id;
+  item.title = "点击卡片编辑规则";
+  item.addEventListener("click", (event) => {
+    if (event.target.closest("button, input, label")) return;
+    const current = pendingFollowRuleEditor?.group.rules.find((entry) => entry.id === rule.id);
+    if (!current) return;
+    pendingFollowRuleEditor.editingRuleId = current.id;
+    pendingFollowRuleEditor.ruleMode = current.mode;
+    renderFollowRuleDialogBody();
+    followRuleDialogBody.querySelector('[data-follow-rule-item-list="items"]')?.focus();
+  });
 
   const enabledLabel = document.createElement("label");
   enabledLabel.className = "telegram-keyword-toggle";
@@ -828,6 +845,7 @@ function addPendingFollowRuleItems() {
   if (!pendingFollowRuleEditor || pendingFollowRuleEditor.type !== "keyword") return;
 
   const { group } = pendingFollowRuleEditor;
+  const editingRule = group.rules.find((rule) => rule.id === pendingFollowRuleEditor.editingRuleId);
   const keywordInput = followRuleDialogBody.querySelector('[data-follow-rule-item-list="items"]');
   const excludeInput = followRuleDialogBody.querySelector('[data-follow-rule-item-list="excludeItems"]');
   const newItems = parseFollowRuleEditorItems(keywordInput?.value);
@@ -846,8 +864,8 @@ function addPendingFollowRuleItems() {
   }
 
   const newRule = {
-    id: createFollowRuleId(),
-    enabled: true,
+    id: editingRule?.id || createFollowRuleId(),
+    enabled: editingRule?.enabled ?? true,
     mode: pendingFollowRuleEditor.ruleMode,
     terms: newItems,
     excludeTerms: newExcludedItems
@@ -857,13 +875,19 @@ function addPendingFollowRuleItems() {
     mode: rule.mode,
     excludeTerms: rule.excludeTerms.map((item) => getFollowRuleItemIdentity("keyword", item))
   });
-  if (group.rules.some((rule) => ruleIdentity(rule) === ruleIdentity(newRule))) {
+  if (group.rules.some((rule) => rule.id !== editingRule?.id && ruleIdentity(rule) === ruleIdentity(newRule))) {
     showToast("相同规则已存在", "error");
     keywordInput?.focus();
     return;
   }
 
-  group.rules.push(newRule);
+  if (editingRule) {
+    Object.assign(editingRule, newRule);
+  } else {
+    group.rules.push(newRule);
+  }
+  pendingFollowRuleEditor.editingRuleId = "";
+  pendingFollowRuleEditor.ruleMode = "all";
   if (keywordInput) keywordInput.value = "";
   if (excludeInput) excludeInput.value = "";
   renderFollowRuleDialogBody();
@@ -893,6 +917,10 @@ function removePendingFollowRuleKeywordRule(ruleId) {
   if (!pendingFollowRuleEditor || pendingFollowRuleEditor.type !== "keyword") return;
   pendingFollowRuleEditor.group.rules = pendingFollowRuleEditor.group.rules
     .filter((rule) => rule.id !== ruleId);
+  if (pendingFollowRuleEditor.editingRuleId === ruleId) {
+    pendingFollowRuleEditor.editingRuleId = "";
+    pendingFollowRuleEditor.ruleMode = "all";
+  }
   renderFollowRuleDialogBody();
 }
 

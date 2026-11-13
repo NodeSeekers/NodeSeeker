@@ -172,35 +172,9 @@ function applyOptionsSnapshot(options) {
 async function restoreOptions() {
   try {
     applyOptionsSnapshot(await readStoredOptions());
-    await refreshShortLinkPermissionStatus();
   } catch (error) {
     showToast(formatToastError(error, "加载设置失败"), "error");
   }
-}
-
-async function requestShortLinkPermissions() {
-  const origins = [
-    "https://bit.ly/*", "https://t.co/*", "https://t.cn/*", "https://ow.ly/*", "https://is.gd/*",
-    "https://buff.ly/*", "https://tinyurl.com/*", "https://shorturl.at/*", "https://rebrand.ly/*", "https://b23.tv/*"
-  ];
-  try {
-    const granted = await chrome.permissions.request({ origins });
-    await refreshShortLinkPermissionStatus();
-    showToast(granted ? "短链解析权限已授权" : "未授权短链解析；确认页跳过和跟踪参数清理仍可使用");
-  } catch (error) {
-    showToast(formatToastError(error, "无法申请短链解析权限"), "error");
-  }
-}
-
-async function refreshShortLinkPermissionStatus() {
-  const origins = [
-    "https://bit.ly/*", "https://t.co/*", "https://t.cn/*", "https://ow.ly/*", "https://is.gd/*",
-    "https://buff.ly/*", "https://tinyurl.com/*", "https://shorturl.at/*", "https://rebrand.ly/*", "https://b23.tv/*"
-  ];
-  const granted = await chrome.permissions.contains({ origins });
-  document.querySelector("#shortLinkPermissionStatus").textContent = granted
-    ? "常见短链解析权限已授权。"
-    : "未授权时仍会绕过 NodeSeek 确认页并清理跟踪参数。";
 }
 
 async function saveOptions(event) {
@@ -214,6 +188,7 @@ async function saveOptions(event) {
       apiKey: form.apiKey.value.trim(),
       userStatsEnabled: form.userStatsEnabled.checked,
       profileHoverSignatureEnabled: form.profileHoverSignatureEnabled.checked,
+      profileHoverTrendEnabled: form.profileHoverTrendEnabled.checked,
       userCacheHours: normalizeUserCacheHours(form.userCacheHours.value),
       profileRetentionDays: normalizeProfileRetentionDays(form.profileRetentionDays.value),
       blockFilterEnabled: form.blockFilterEnabled.checked,
@@ -226,7 +201,6 @@ async function saveOptions(event) {
       attendanceReminderEnabled: form.attendanceReminderEnabled.checked,
       autoAttendanceEnabled: form.autoAttendanceEnabled.checked,
       autoAttendanceMode: form.autoAttendanceMode.value === "fixed" ? "fixed" : "random",
-      linkPurifierEnabled: form.linkPurifierEnabled.checked,
       imagePreviewEnabled: form.imagePreviewEnabled.checked,
       messageEntryEnabled: form.messageEntryEnabled.checked,
       editorToolsEnabled: form.editorToolsEnabled.checked,
@@ -239,6 +213,7 @@ async function saveOptions(event) {
       postSwitcherPreviousShortcut: normalizeShortcut(form.postSwitcherPreviousShortcut.value),
       postSwitcherNextShortcut: normalizeShortcut(form.postSwitcherNextShortcut.value),
       quickReplyShortcut: normalizeShortcut(form.quickReplyShortcut.value),
+      replySubmitShortcut: normalizeShortcut(form.replySubmitShortcut.value),
       quickPhrasesEnabled: form.quickPhrasesEnabled.checked,
       quickPhraseShortcut: normalizeShortcut(form.quickPhraseShortcut.value),
       quickPhrases: normalizeQuickPhrases(quickPhrases),
@@ -274,7 +249,15 @@ async function resetOptions() {
       "telegramRssHistory",
       "telegramMonitorPaused",
       "telegramMonitorLastCheck",
-      "telegramMonitorLastError"
+      "telegramMonitorLastError",
+      "telegramPendingDirectTopics",
+      "telegramPendingPersonalChatId",
+      "telegramPendingPersonalTargetName",
+      "telegramPersonalStartWatchUntil",
+      "telegramPersonalStartWatchSince",
+      "telegramPersonalStartOffset",
+      "telegramPersonalStartRepliedUpdateId",
+      "telegramPendingPersonalStartUpdateId"
     ]);
     await chrome.storage.local.set({
       ...DEFAULT_OPTIONS,
@@ -327,6 +310,7 @@ function setFormValues(options) {
   form.apiKey.value = options.apiKey;
   form.userStatsEnabled.checked = options.userStatsEnabled;
   form.profileHoverSignatureEnabled.checked = options.profileHoverSignatureEnabled;
+  form.profileHoverTrendEnabled.checked = options.profileHoverTrendEnabled;
   form.userCacheHours.value = normalizeUserCacheHours(options.userCacheHours);
   form.profileRetentionDays.value = String(normalizeProfileRetentionDays(options.profileRetentionDays));
   form.blockFilterEnabled.checked = options.blockFilterEnabled;
@@ -340,7 +324,6 @@ function setFormValues(options) {
   form.attendanceReminderEnabled.checked = options.attendanceReminderEnabled;
   form.autoAttendanceEnabled.checked = options.autoAttendanceEnabled;
   form.autoAttendanceMode.value = options.autoAttendanceMode;
-  form.linkPurifierEnabled.checked = options.linkPurifierEnabled;
   form.imagePreviewEnabled.checked = options.imagePreviewEnabled;
   form.messageEntryEnabled.checked = options.messageEntryEnabled;
   form.editorToolsEnabled.checked = options.editorToolsEnabled;
@@ -354,6 +337,7 @@ function setFormValues(options) {
   form.postSwitcherPreviousShortcut.value = formatShortcutForDisplay(options.postSwitcherPreviousShortcut);
   form.postSwitcherNextShortcut.value = formatShortcutForDisplay(options.postSwitcherNextShortcut);
   form.quickReplyShortcut.value = formatShortcutForDisplay(options.quickReplyShortcut);
+  form.replySubmitShortcut.value = formatShortcutForDisplay(options.replySubmitShortcut);
   form.quickPhrasesEnabled.checked = options.quickPhrasesEnabled;
   form.quickPhraseShortcut.value = formatShortcutForDisplay(options.quickPhraseShortcut);
   quickPhrases = normalizeQuickPhrases(options.quickPhrases);
@@ -374,6 +358,7 @@ function normalizeStoredOptions(options) {
     imageUploadEnabled: options.imageUploadEnabled !== false,
     userStatsEnabled: options.userStatsEnabled !== false,
     profileHoverSignatureEnabled: options.profileHoverSignatureEnabled !== false,
+    profileHoverTrendEnabled: options.profileHoverTrendEnabled === true,
     userCacheHours: normalizeUserCacheHours(options.userCacheHours),
     profileRetentionDays: normalizeProfileRetentionDays(options.profileRetentionDays),
     blockFilterEnabled: options.blockFilterEnabled !== false,
@@ -386,7 +371,6 @@ function normalizeStoredOptions(options) {
     attendanceReminderEnabled: options.attendanceReminderEnabled !== false,
     autoAttendanceEnabled: options.autoAttendanceEnabled === true,
     autoAttendanceMode: options.autoAttendanceMode === "fixed" ? "fixed" : "random",
-    linkPurifierEnabled: options.linkPurifierEnabled !== false,
     imagePreviewEnabled: options.imagePreviewEnabled !== false,
     messageEntryEnabled: options.messageEntryEnabled !== false,
     editorToolsEnabled: options.editorToolsEnabled !== false,
@@ -413,6 +397,10 @@ function normalizeStoredOptions(options) {
     quickReplyShortcut: normalizeShortcut(
       options.quickReplyShortcut,
       DEFAULT_OPTIONS.quickReplyShortcut
+    ),
+    replySubmitShortcut: normalizeShortcut(
+      options.replySubmitShortcut,
+      DEFAULT_OPTIONS.replySubmitShortcut
     ),
     quickPhrasesEnabled: options.quickPhrasesEnabled !== false,
     quickPhraseShortcut: normalizeShortcut(

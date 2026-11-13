@@ -4,6 +4,13 @@ test-results/
 playwright-report/
 dist/
 
+# Development-only documentation
+AGENT.md
+AGENTS.md
+**/AGENT.md
+**/AGENTS.md
+tests/**/README.md
+
 # Local credentials and machine-specific files
 .env
 .env.*
@@ -25,3 +32,4 @@ dist/
 nodeseek-helper-config-*.json
 nodeseek-helper-data-*.json
 nodeseek-config.json
+nsh-preloaded-config.json
