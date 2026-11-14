@@ -1,11 +1,11 @@
-# 🧩 NodeSeeker：开源 NodeSeek 浏览器插件，支持 ✈️ Telegram 私信推送
+# 🧩 NodeSeeker：开源 NodeSeek Chrome 浏览器插件，支持 ✈️ Telegram 私信推送
 
-🙏 特别感谢 **NodeSeek Helper** 原作者[zhu0823大佬](https://www.nodeseek.com/post-810553-1)的创作与分享。本项目基于原版修改。
+🙏 特别感谢 **NodeSeek Helper** 原作者[zhu0823](https://www.nodeseek.com/post-810553-1)大佬的创作与分享。本项目基于原版修改。
 
 🔗 **安装地址**
 
-- [原版 Chrome Web Store 安装](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
-- [✈️ TG 私信通知版](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip)
+- [🏪Chrome Store 原版](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
+- [🧩NodeSeeker版](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip)
 
 🔗 **开源地址**
 
@@ -17,7 +17,8 @@
 > 🔔 接收重要消息通知
 
 > [!caution]
-> 📵 插件不支持手机
+> 📱 手机暂时还不能用。
+> 🌐 目前只支持 Chrome 内核浏览器；Safari 版如果有人要可以自己改源码。
 
 ---
 
@@ -56,7 +57,7 @@
 
 | **📊 等级和每日进度** | **🔎 关注主题高亮** | **📬 私信预览** | **📬 提及与回复预览** |
 |---|---|---|---|
-| ![等级和每日进度](https://cdn.nodeimage.com/i/OunbvOYznfpQbMHErUXMcPb0lZRNd2Kk.png) | ![关键词标记](https://cdn.nodeimage.com/i/jxTTB3kESeK47ZcHI4AXHnSXcaVOZz92.webp) | ![私信预览](https://cdn.nodeimage.com/i/KwXqqbm9uO0X3vsqvmvA0kdjgkhmNnLY.png) | ![提及与回复预览](https://cdn.nodeimage.com/i/S7qLV2RzBMwpVYLPohMPolu5YGEtk9Hs.png) |
+| ![等级和每日进度](https://cdn.nodeimage.com/i/OunbvOYznfpQbMHErUXMcPb0lZRNd2Kk.png) | ![关键词标记](https://cdn.nodeimage.com/i/jxTTB3kESeK47ZcHI4AXHnSXcaVOZz92.webp) | ![私信预览](https://cdn.nodeimage.com/i/S7qLV2RzBMwpVYLPohMPolu5YGEtk9Hs.png) | ![提及与回复预览](https://cdn.nodeimage.com/i/KwXqqbm9uO0X3vsqvmvA0kdjgkhmNnLY.png) |
 
 :::
 ::::
@@ -75,4 +76,4 @@
 
 扩展设置保存在本机浏览器。配置导出文件可能包含 NodeImage API Key、✈️ Telegram Bot Token 和接收目标，请勿公开分享。启用 ✈️ Telegram 通知后，符合规则的私信或新帖信息会发送到你配置的 ✈️ Telegram 目标。
 
-🙏 再次感谢 **NodeSeek Helper** zhu0823大佬分享原始作品。
+🙏 再次感谢 **NodeSeek Helper** 作者[zhu0823](https://www.nodeseek.com/post-810553-1)大佬。
