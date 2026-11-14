@@ -14,7 +14,8 @@ function scanEditorFormattingTools() {
   }
 
   document.querySelectorAll(".CodeMirror").forEach((editor) => {
-    const mount = editor.parentElement;
+    const editorArea = editor.closest(".content-area");
+    const mount = editorArea?.parentElement || editor.parentElement;
     if (!mount || mount.querySelector(":scope > .nsh-editor-format-toolbar")) return;
     const toolbar = document.createElement("div");
     toolbar.className = "nsh-editor-format-toolbar";
@@ -35,7 +36,11 @@ function scanEditorFormattingTools() {
         toolbar.appendChild(createEditorCalloutTypeSelect(editor));
       }
     });
-    mount.insertBefore(toolbar, editor);
+    if (editorArea?.parentElement === mount) {
+      editorArea.before(toolbar);
+    } else {
+      mount.insertBefore(toolbar, editor);
+    }
   });
 }
 
