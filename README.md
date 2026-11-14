@@ -4,12 +4,12 @@
 
 🔗 **安装地址**
 
-- [🏪Chrome Store 原版](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp)
-- [🧩NodeSeeker版](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip)
+- 🏪 [NodeSeek Helper原版](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp) Chrome Store安装
+- 🧩 [NodeSeeker版](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip) 源码安装
 
 🔗 **开源地址**
 
-- [GitHub：NodeSeekers/NodeSeeker](https://github.com/NodeSeekers/NodeSeeker)
+- [GitHub：NodeSeeker](https://github.com/NodeSeekers/NodeSeeker)
 
 > [!tip]
 > 🧩 安装插件 → 登录账号
@@ -17,7 +17,7 @@
 > 🔔 接收重要消息通知
 
 > [!caution]
-> 📱 手机暂时还不能用。
+> 📱 不支持手机。
 > 🌐 目前只支持 Chrome 内核浏览器；Safari 版如果有人要可以自己改源码。
 
 ---
