@@ -1,4 +1,4 @@
-# 🧩 NodeSeeker：开源 NodeSeek Chrome 浏览器插件，支持 ✈️ Telegram 私信推送
+# 🧩 NodeSeeker：开源 NodeSeek Chrome 浏览器插件，支持 ✈️ Telegram 关键字/私信推送
 
 🙏 特别感谢 **NodeSeek Helper** 原作者[zhu0823](https://www.nodeseek.com/post-810553-1)大佬的创作与分享。本项目基于原版修改。
 
@@ -6,6 +6,7 @@
 
 - 🏪 [NodeSeek Helper原版](https://chromewebstore.google.com/detail/nodeseek-helper/fljjlmmflicoocnceopdeeibflcohenp) Chrome Store安装
 - 🧩 [NodeSeeker版](https://github.com/NodeSeekers/NodeSeeker/releases/latest/download/nodeseeker.zip) 源码安装
+- 🧩 [Github](https://github.com/NodeSeekers/NodeSeeker)
 
 🔗 **开源地址**
 

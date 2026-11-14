@@ -11,8 +11,18 @@ function loadHelpers() {
   return sandbox;
 }
 
-function buildMessageUrl(entry) {
-  return vm.runInContext(`buildNotificationMessageUrl(${JSON.stringify(entry)})`, loadHelpers());
+function buildMessageUrl(entry, currentUserId = "") {
+  const sandbox = vm.createContext({
+    URL,
+    location: { origin: "https://www.nodeseek.com" },
+    document: {
+      querySelector: () => currentUserId
+        ? { getAttribute: () => `/space/${currentUserId}` }
+        : null
+    }
+  });
+  vm.runInContext(source, sandbox);
+  return vm.runInContext(`buildNotificationMessageUrl(${JSON.stringify(entry)})`, sandbox);
 }
 
 function buildPostUrl(entry) {
@@ -23,23 +33,29 @@ test("message preview opens the sender's direct conversation", () => {
   expect(buildMessageUrl({ sender_id: 12345 })).toBe("/notification#/message?mode=talk&to=12345");
 });
 
+test("message preview opens the other participant's conversation for an outgoing message", () => {
+  expect(buildMessageUrl({ sender_id: 777, receiver_id: 12345 }, "777"))
+    .toBe("/notification#/message?mode=talk&to=12345");
+});
+
 test("message preview falls back to the message list without a user ID", () => {
   expect(buildMessageUrl({})).toBe("/notification#/message?mode=list");
 });
 
-test("private message preview keeps incoming messages and hides messages sent by the current user", () => {
+test("private message preview displays incoming and outgoing messages", async () => {
   const entries = [
     { id: "incoming", sender_id: "222", receiver_id: "777" },
-    { id: "outgoing", sender_id: "777", receiver_id: "222" },
-    { id: "self", sender_id: "777", receiver_id: "777" }
+    { id: "outgoing", sender_id: "777", receiver_id: "222" }
   ];
-  const sandbox = loadHelpers();
-  const visibleIds = vm.runInContext(
-    `filterIncomingNotificationMessages(${JSON.stringify(entries)}, "777").map((entry) => entry.id)`,
-    sandbox
-  );
+  const sandbox = vm.createContext({
+    URL,
+    location: { origin: "https://www.nodeseek.com" },
+    fetch: async () => ({ ok: true, json: async () => ({ success: true, msgArray: entries }) })
+  });
+  vm.runInContext(source, sandbox);
+  const loadedEntries = await vm.runInContext('loadNotificationPreviewEntries("message")', sandbox);
 
-  expect(Array.from(visibleIds)).toEqual(["incoming"]);
+  expect(Array.from(loadedEntries, (entry) => entry.id)).toEqual(["incoming", "outgoing"]);
 });
 
 test("private message preview reads the current user ID from the sidebar profile link", () => {
@@ -56,6 +72,132 @@ test("private message preview reads the current user ID from the sidebar profile
 
   expect(vm.runInContext("getNotificationPreviewCurrentUserId()", sandbox)).toBe("777");
 });
+
+test("outgoing message preview displays the conversation partner name without a direction prefix", () => {
+  const sandbox = vm.createContext({
+    URL,
+    location: { origin: "https://www.nodeseek.com" },
+    document: {
+      querySelector: () => ({ getAttribute: () => "/space/777" })
+    }
+  });
+  vm.runInContext(source, sandbox);
+
+  const participant = vm.runInContext(`getNotificationPreviewMessageParticipant({
+    sender_id: "777",
+    sender_name: "我的用户名",
+    receiver_id: "222",
+    receiver_name: "对话对象"
+  })`, sandbox);
+
+  expect(participant.name).toBe("对话对象");
+  expect(participant.userId).toBe("222");
+});
+
+test("private message preview fetches fresh entries instead of reusing its cache", async () => {
+  let fetchCount = 0;
+  let requestOptions;
+  const sandbox = vm.createContext({
+    URL,
+    location: { origin: "https://www.nodeseek.com" },
+    document: {
+      querySelector: () => ({ getAttribute: () => "/space/777" })
+    },
+    fetch: async (_url, options) => {
+      fetchCount += 1;
+      requestOptions = options;
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          msgArray: [{ id: fetchCount, sender_id: "222", receiver_id: "777", content: `新消息 ${fetchCount}` }]
+        })
+      };
+    }
+  });
+  vm.runInContext(source, sandbox);
+  vm.runInContext(`notificationPreviewCache.set("message", {
+    loadedAt: Date.now(),
+    entries: [{ id: "old", sender_id: "222", receiver_id: "777", content: "旧消息" }]
+  })`, sandbox);
+
+  const entries = await vm.runInContext('loadNotificationPreviewEntries("message")', sandbox);
+
+  expect(fetchCount).toBe(1);
+  expect(requestOptions.cache).toBe("no-store");
+  expect(entries[0].content).toBe("新消息 1");
+});
+
+for (const key of ["at", "reply"]) {
+  test(`${key} preview fetches fresh entries and bypasses the browser cache`, async () => {
+    let fetchCount = 0;
+    let requestOptions;
+    const sandbox = vm.createContext({
+      URL,
+      location: { origin: "https://www.nodeseek.com" },
+      fetch: async (_url, options) => {
+        fetchCount += 1;
+        requestOptions = options;
+        return { ok: true, json: async () => ({ success: true, data: [{ id: `new-${fetchCount}` }] }) };
+      }
+    });
+    vm.runInContext(source, sandbox);
+    vm.runInContext(`notificationPreviewCache.set("${key}", {
+      loadedAt: Date.now(),
+      entries: [{ id: "old" }]
+    })`, sandbox);
+
+    const entries = await vm.runInContext(`loadNotificationPreviewEntries("${key}")`, sandbox);
+
+    expect(fetchCount).toBe(1);
+    expect(requestOptions.cache).toBe("no-store");
+    expect(entries[0].id).toBe("new-1");
+  });
+}
+
+for (const { key, label } of [
+  { key: "at", label: "提及" },
+  { key: "reply", label: "回复" },
+  { key: "message", label: "私信" }
+]) {
+  test(`open ${label} preview refreshes again after the refresh interval`, async () => {
+    let timerCallback;
+    let timerDelay = 0;
+    const preview = { classList: { contains: (name) => name === "is-open" } };
+    const anchor = { dataset: { nshPreviewRequest: "request-1" } };
+    const state = { renderedMessage: "" };
+    const sandbox = vm.createContext({
+      URL,
+      location: { origin: "https://www.nodeseek.com" },
+      testPreview: preview,
+      testAnchor: anchor,
+      testState: state,
+      window: {
+        clearTimeout() {},
+        setTimeout(callback, delay) {
+          timerCallback = callback;
+          timerDelay = delay;
+          return 1;
+        }
+      }
+    });
+    vm.runInContext(source, sandbox);
+    vm.runInContext("notificationPreview = testPreview", sandbox);
+    vm.runInContext('activeNotificationPreviewRequestId = "request-1"', sandbox);
+    vm.runInContext("loadNotificationPreviewEntries = async () => [{content: '刚收到的新通知'}]", sandbox);
+    vm.runInContext(`renderNotificationPreviewEntries = (_popup, _item, entries) => {
+      testState.renderedMessage = entries[0].content;
+    }`, sandbox);
+    vm.runInContext("positionNotificationPreview = () => {}", sandbox);
+
+    vm.runInContext(`scheduleNotificationPreviewRefresh(testAnchor, {key:"${key}",label:"${label}"}, "request-1")`, sandbox);
+    expect(timerDelay).toBe(30_000);
+
+    await timerCallback();
+
+    expect(state.renderedMessage).toBe("刚收到的新通知");
+  });
+}
 
 test("reply preview opens the page containing its target floor", () => {
   expect(buildPostUrl({ post_id: 9876, comment_id: 456, floor_id: 15 }))

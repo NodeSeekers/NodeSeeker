@@ -8,7 +8,7 @@ const MESSAGE_ENTRY_COUNT_POSITIVE_CLASS = "nsh-message-entry-count-positive";
 const MESSAGE_ENTRY_ORIGINAL_ATTRIBUTE = "data-nsh-message-entry-original";
 const MESSAGE_ENTRY_VERSION = "5";
 const MESSAGE_ENTRY_COUNTS_TTL_MS = 30 * 1000;
-const NOTIFICATION_PREVIEW_TTL_MS = 30 * 1000;
+const NOTIFICATION_PREVIEW_REFRESH_MS = 30 * 1000;
 const NOTIFICATION_PREVIEW_HIDE_MS = 180;
 const NOTIFICATION_COMMENT_PAGE_SIZE = 10;
 const ORIGINAL_NOTIFICATION_ENTRY = {
@@ -42,6 +42,8 @@ let messageEntryCountsPromise = null;
 let messageEntryCountsLoadedAt = 0;
 let notificationPreview = null;
 let notificationPreviewHideTimer = 0;
+let notificationPreviewRefreshTimer = 0;
+let activeNotificationPreviewRequestId = "";
 const notificationPreviewCache = new Map();
 
 function scanMessageEntry() {
@@ -227,7 +229,9 @@ function bindNotificationPreview(link, item) {
 async function showNotificationPreview(anchor, item) {
   if (!featureOptions.messageEntryEnabled) return;
   window.clearTimeout(notificationPreviewHideTimer);
+  clearNotificationPreviewRefresh();
   const requestId = `${Date.now()}-${Math.random()}`;
+  activeNotificationPreviewRequestId = requestId;
   anchor.dataset.nshPreviewRequest = requestId;
   const popup = ensureNotificationPreview();
   popup.replaceChildren(createNotificationPreviewHeading(item), createNotificationPreviewMessage("加载中…"));
@@ -236,11 +240,12 @@ async function showNotificationPreview(anchor, item) {
 
   try {
     const entries = await loadNotificationPreviewEntries(item.key);
-    if (anchor.dataset.nshPreviewRequest !== requestId) return;
+    if (activeNotificationPreviewRequestId !== requestId || anchor.dataset.nshPreviewRequest !== requestId) return;
     renderNotificationPreviewEntries(popup, item, entries);
     positionNotificationPreview(popup, anchor);
+    scheduleNotificationPreviewRefresh(anchor, item, requestId);
   } catch (_error) {
-    if (anchor.dataset.nshPreviewRequest === requestId) {
+    if (activeNotificationPreviewRequestId === requestId && anchor.dataset.nshPreviewRequest === requestId) {
       popup.replaceChildren(createNotificationPreviewHeading(item), createNotificationPreviewMessage("暂时无法加载"));
     }
   }
@@ -328,46 +333,45 @@ function createNotificationPreviewMessage(text) {
 }
 
 async function loadNotificationPreviewEntries(key) {
-  const cached = notificationPreviewCache.get(key);
-  if (cached && Date.now() - cached.loadedAt < NOTIFICATION_PREVIEW_TTL_MS) return cached.entries;
   const paths = {
     at: "/api/notification/at-me/list?page=1",
     reply: "/api/notification/reply-to-me/list?page=1",
     message: "/api/notification/message/list"
   };
-  const response = await fetch(paths[key], {
+  const requestOptions = {
     credentials: "include",
+    cache: "no-store",
     headers: { Accept: "application/json" }
-  });
+  };
+  const response = await fetch(paths[key], requestOptions);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
   if (data?.success !== true) throw new Error("通知接口返回异常");
-  let entries = key === "message" ? data.msgArray : data.data;
+  const entries = key === "message" ? data.msgArray : data.data;
   if (!Array.isArray(entries)) throw new Error("通知列表格式异常");
-  if (key === "message") {
-    const currentUserId = getNotificationPreviewCurrentUserId();
-    if (!currentUserId) throw new Error("无法识别当前账号");
-    entries = filterIncomingNotificationMessages(entries, currentUserId);
-  }
   notificationPreviewCache.set(key, { loadedAt: Date.now(), entries });
   return entries;
 }
 
 function getNotificationPreviewCurrentUserId() {
+  if (typeof document === "undefined") return "";
   const profileLink = document.querySelector(
     "#nsk-right-panel-container .user-card:not(.hover-user-card) a[href^='/space/']"
   );
   return String(profileLink?.getAttribute("href") || "").match(/^\/space\/(\d+)/)?.[1] || "";
 }
 
-function filterIncomingNotificationMessages(entries, currentUserId) {
-  const userId = String(currentUserId || "").trim();
-  if (!userId || !Array.isArray(entries)) return [];
-  return entries.filter((entry) => {
-    const senderId = String(entry?.sender_id ?? "").trim();
-    const receiverId = String(entry?.receiver_id ?? "").trim();
-    return senderId !== "" && senderId !== userId && receiverId === userId;
-  });
+function getNotificationPreviewMessageParticipant(entry) {
+  const senderId = String(entry?.sender_id ?? "").trim();
+  const receiverId = String(entry?.receiver_id ?? "").trim();
+  const currentUserId = getNotificationPreviewCurrentUserId();
+  const sentByCurrentUser = Boolean(currentUserId) && senderId === currentUserId;
+  return {
+    name: sentByCurrentUser
+      ? (entry?.receiver_name || entry?.sender_name || "NodeSeek 用户")
+      : (entry?.sender_name || entry?.receiver_name || "NodeSeek 用户"),
+    userId: sentByCurrentUser ? receiverId : (senderId || receiverId)
+  };
 }
 
 function renderNotificationPreviewEntries(popup, item, entries) {
@@ -378,6 +382,9 @@ function renderNotificationPreviewEntries(popup, item, entries) {
     .sort((left, right) => (Date.parse(right.created_at || "") || 0) - (Date.parse(left.created_at || "") || 0))
     .slice(0, 10);
   visibleEntries.forEach((entry) => {
+    const messageParticipant = item.key === "message"
+      ? getNotificationPreviewMessageParticipant(entry)
+      : null;
     const row = document.createElement("li");
     row.className = "nsh-notification-preview-row";
     row.dataset.notificationKey = item.key;
@@ -397,15 +404,15 @@ function renderNotificationPreviewEntries(popup, item, entries) {
         .finally(() => location.assign(link.href));
     });
     const avatar = createNotificationPreviewAvatar(
-      item.key === "message" ? (entry.sender_name || entry.receiver_name) : entry.commenter_name,
-      item.key === "message" ? (entry.sender_id || entry.receiver_id) : entry.commenter_id
+      item.key === "message" ? messageParticipant.name : entry.commenter_name,
+      item.key === "message" ? messageParticipant.userId : entry.commenter_id
     );
     const copy = document.createElement("span");
     copy.className = "nsh-notification-preview-copy";
     if (item.key === "message") {
       link.href = buildNotificationMessageUrl(entry);
       const sender = document.createElement("strong");
-      sender.textContent = entry.sender_name || entry.receiver_name || "NodeSeek 用户";
+      sender.textContent = messageParticipant.name;
       const body = document.createElement("span");
       body.textContent = cleanNotificationPreviewText(entry.content) || "（无文本内容）";
       const date = document.createElement("time");
@@ -528,7 +535,8 @@ function buildNotificationPostUrl(entry) {
 }
 
 function buildNotificationMessageUrl(entry) {
-  const userId = String(entry?.sender_id || entry?.receiver_id || "").replace(/\D/g, "");
+  const participant = getNotificationPreviewMessageParticipant(entry);
+  const userId = String(participant.userId || "").replace(/\D/g, "");
   return userId ? `/notification#/message?mode=talk&to=${encodeURIComponent(userId)}` : "/notification#/message?mode=list";
 }
 
@@ -602,7 +610,53 @@ function scheduleHideNotificationPreview() {
   window.clearTimeout(notificationPreviewHideTimer);
   notificationPreviewHideTimer = window.setTimeout(() => {
     notificationPreview?.classList.remove("is-open");
+    activeNotificationPreviewRequestId = "";
+    clearNotificationPreviewRefresh();
   }, NOTIFICATION_PREVIEW_HIDE_MS);
+}
+
+function scheduleNotificationPreviewRefresh(anchor, item, requestId) {
+  clearNotificationPreviewRefresh();
+  notificationPreviewRefreshTimer = window.setTimeout(() => {
+    notificationPreviewRefreshTimer = 0;
+    return refreshOpenNotificationPreview(anchor, item, requestId);
+  }, NOTIFICATION_PREVIEW_REFRESH_MS);
+}
+
+async function refreshOpenNotificationPreview(anchor, item, requestId) {
+  const popup = notificationPreview;
+  if (
+    !popup?.classList.contains("is-open")
+    || activeNotificationPreviewRequestId !== requestId
+    || anchor.dataset.nshPreviewRequest !== requestId
+  ) {
+    return;
+  }
+
+  try {
+    const entries = await loadNotificationPreviewEntries(item.key);
+    if (
+      notificationPreview !== popup
+      || !popup.classList.contains("is-open")
+      || activeNotificationPreviewRequestId !== requestId
+      || anchor.dataset.nshPreviewRequest !== requestId
+    ) {
+      return;
+    }
+    renderNotificationPreviewEntries(popup, item, entries);
+    positionNotificationPreview(popup, anchor);
+  } catch (_error) {
+    // Keep the current preview visible if a background refresh temporarily fails.
+  }
+
+  if (notificationPreview === popup && popup.classList.contains("is-open")) {
+    scheduleNotificationPreviewRefresh(anchor, item, requestId);
+  }
+}
+
+function clearNotificationPreviewRefresh() {
+  window.clearTimeout(notificationPreviewRefreshTimer);
+  notificationPreviewRefreshTimer = 0;
 }
 
 function loadMessageEntryCounts() {
