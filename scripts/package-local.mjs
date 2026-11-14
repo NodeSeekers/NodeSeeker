@@ -22,14 +22,19 @@ Object.assign(configPayload.options, {
   apiKey: "",
   telegramBotToken: "",
   telegramTargets: [],
+  telegramMentionNotificationsEnabled: false,
+  telegramReplyNotificationsEnabled: false,
+  telegramMonitorIntervalSeconds: 60,
   telegramKeywordRules: [],
   telegramBlockedKeywords: [],
   telegramBoardSlugs: [],
   telegramMonitorPaused: false,
   telegramMessageCursors: {},
+  telegramMentionReplyCursors: {},
   telegramRssInitialized: false,
   telegramRssSeenIds: []
 });
+delete configPayload.options.telegramMentionReplyNotificationsEnabled;
 for (const key of [
   "telegramChatId", "telegramRssHistory", "telegramPendingDirectTopics",
   "telegramPendingPersonalChatId", "telegramPendingPersonalTargetName",

@@ -3,10 +3,13 @@ const TELEGRAM_KEYS = {
   targets: "telegramTargets",
   messagesEnabled: "telegramMessageNotificationsEnabled",
   postsEnabled: "telegramPostNotificationsEnabled",
+  mentionEnabled: "telegramMentionNotificationsEnabled",
+  replyEnabled: "telegramReplyNotificationsEnabled",
   keywords: "telegramKeywordRules",
   blockedKeywords: "telegramBlockedKeywords",
   boards: "telegramBoardSlugs",
   messageCursors: "telegramMessageCursors",
+  mentionReplyCursors: "telegramMentionReplyCursors",
   rssSeenIds: "telegramRssSeenIds",
   rssInitialized: "telegramRssInitialized",
   rssHistory: "telegramRssHistory",
@@ -17,6 +20,14 @@ const TELEGRAM_KEYS = {
 const TELEGRAM_RSS_URL = "https://rss.nodeseek.com/";
 const TELEGRAM_RSS_HISTORY_LIMIT = 100;
 const TELEGRAM_RSS_SEEN_LIMIT = 500;
+const TELEGRAM_ACTIVITY_CURSOR_LIMIT = 500;
+const TELEGRAM_ACTIVITY_PAGE_LIMIT = 20;
+const TELEGRAM_ACTIVITY_PAGE_SIZE = 10;
+const TELEGRAM_MONITOR_INTERVAL_SECONDS = Object.freeze([30, 60, 300, 900]);
+const TELEGRAM_ACTIVITY_ENDPOINTS = Object.freeze({
+  at: "/api/notification/at-me/list",
+  reply: "/api/notification/reply-to-me/list"
+});
 const TELEGRAM_PERSONAL_START_WATCH_DURATION_MS = 5 * 60 * 1000;
 const TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY = "telegramPersonalStartWatchUntil";
 const TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY = "telegramPersonalStartWatchSince";
@@ -27,7 +38,7 @@ const TELEGRAM_PENDING_PERSONAL_CHAT_ID_KEY = "telegramPendingPersonalChatId";
 const TELEGRAM_PENDING_PERSONAL_TARGET_NAME_KEY = "telegramPendingPersonalTargetName";
 let telegramPersonalStartCheckInFlight = false;
 let telegramMonitorCheckInFlight = false;
-const TELEGRAM_DIRECT_MESSAGE_URL = "https://www.nodeseek.com/notification#/message?mode=list";
+const TELEGRAM_DIRECT_MESSAGE_URL = "https://www.nodeseek.com/notification#/message?mode=talk&to=";
 const TELEGRAM_BOARD_NAMES = {
   daily: "日常",
   tech: "技术",
@@ -57,19 +68,45 @@ async function getTelegramUpdateConflictMessage(token) {
   return "Telegram 暂时检测到另一个 getUpdates 请求。这个冲突只影响自动读取 ID，不影响插件直接发送通知；稍后重试即可。";
 }
 
-async function scheduleTelegramMonitorAlarm(resetMessageBaseline = false) {
+async function scheduleTelegramMonitorAlarm(
+  resetMessageBaseline = false,
+  resetMentionBaseline = false,
+  resetReplyBaseline = false
+) {
   const config = await chrome.storage.local.get({
     [TELEGRAM_KEYS.token]: "",
     [TELEGRAM_KEYS.targets]: [],
     [TELEGRAM_KEYS.messagesEnabled]: true,
     [TELEGRAM_KEYS.postsEnabled]: true,
+    [TELEGRAM_KEYS.mentionEnabled]: null,
+    [TELEGRAM_KEYS.replyEnabled]: null,
+    telegramMentionReplyNotificationsEnabled: null,
+    telegramMonitorIntervalSeconds: 60,
     [TELEGRAM_KEYS.paused]: false
   });
+  if (typeof config[TELEGRAM_KEYS.mentionEnabled] !== "boolean"
+      || typeof config[TELEGRAM_KEYS.replyEnabled] !== "boolean"
+      || config.telegramMentionReplyNotificationsEnabled !== null) {
+    config[TELEGRAM_KEYS.mentionEnabled] = typeof config[TELEGRAM_KEYS.mentionEnabled] === "boolean"
+      ? config[TELEGRAM_KEYS.mentionEnabled]
+      : config.telegramMentionReplyNotificationsEnabled === true;
+    config[TELEGRAM_KEYS.replyEnabled] = typeof config[TELEGRAM_KEYS.replyEnabled] === "boolean"
+      ? config[TELEGRAM_KEYS.replyEnabled]
+      : config.telegramMentionReplyNotificationsEnabled === true;
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.mentionEnabled]: config[TELEGRAM_KEYS.mentionEnabled],
+      [TELEGRAM_KEYS.replyEnabled]: config[TELEGRAM_KEYS.replyEnabled]
+    });
+    await chrome.storage.local.remove("telegramMentionReplyNotificationsEnabled");
+  }
   const targets = Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [];
   const hasTarget = targets.some((target) => target?.enabled !== false && target?.chatId);
   const ready = config[TELEGRAM_KEYS.token].trim() && hasTarget
     && !config[TELEGRAM_KEYS.paused]
-    && (config[TELEGRAM_KEYS.messagesEnabled] || config[TELEGRAM_KEYS.postsEnabled]);
+    && (config[TELEGRAM_KEYS.messagesEnabled]
+      || config[TELEGRAM_KEYS.postsEnabled]
+      || config[TELEGRAM_KEYS.mentionEnabled]
+      || config[TELEGRAM_KEYS.replyEnabled]);
 
   if (!ready) {
     await chrome.alarms.clear(TELEGRAM_MESSAGE_ALARM_NAME);
@@ -79,13 +116,24 @@ async function scheduleTelegramMonitorAlarm(resetMessageBaseline = false) {
   if (resetMessageBaseline) {
     await chrome.storage.local.remove(TELEGRAM_KEYS.messageCursors);
   }
+  if (resetMentionBaseline || resetReplyBaseline) {
+    const storedCursors = await chrome.storage.local.get({ [TELEGRAM_KEYS.mentionReplyCursors]: {} });
+    const cursors = { ...(storedCursors[TELEGRAM_KEYS.mentionReplyCursors] || {}) };
+    if (resetMentionBaseline) delete cursors.at;
+    if (resetReplyBaseline) delete cursors.reply;
+    await chrome.storage.local.set({ [TELEGRAM_KEYS.mentionReplyCursors]: cursors });
+  }
+  const intervalSeconds = TELEGRAM_MONITOR_INTERVAL_SECONDS.includes(Number(config.telegramMonitorIntervalSeconds))
+    ? Number(config.telegramMonitorIntervalSeconds)
+    : 60;
+  const intervalInMinutes = intervalSeconds / 60;
   chrome.alarms.create(TELEGRAM_MESSAGE_ALARM_NAME, {
-    delayInMinutes: 1,
-    periodInMinutes: 1
+    delayInMinutes: intervalInMinutes,
+    periodInMinutes: intervalInMinutes
   });
-  if (resetMessageBaseline) {
+  if (resetMessageBaseline || resetMentionBaseline || resetReplyBaseline) {
     checkTelegramNotifications().catch((error) => {
-      console.warn("Telegram baseline failed:", error?.message || "unknown error");
+      console.warn("Telegram notification baseline failed:", error?.message || "unknown error");
     });
   }
 }
@@ -99,10 +147,13 @@ async function checkTelegramNotifications() {
       [TELEGRAM_KEYS.targets]: [],
       [TELEGRAM_KEYS.messagesEnabled]: true,
       [TELEGRAM_KEYS.postsEnabled]: true,
+      [TELEGRAM_KEYS.mentionEnabled]: false,
+      [TELEGRAM_KEYS.replyEnabled]: false,
       [TELEGRAM_KEYS.keywords]: [],
       [TELEGRAM_KEYS.blockedKeywords]: [],
       [TELEGRAM_KEYS.boards]: [],
       [TELEGRAM_KEYS.messageCursors]: null,
+      [TELEGRAM_KEYS.mentionReplyCursors]: {},
       [TELEGRAM_KEYS.rssSeenIds]: [],
       [TELEGRAM_KEYS.rssInitialized]: false,
       [TELEGRAM_KEYS.rssHistory]: [],
@@ -125,6 +176,18 @@ async function checkTelegramNotifications() {
         await checkRssPosts(config);
       } catch (error) {
         errors.push(`RSS：${error?.message || "检查失败"}`);
+      }
+    }
+    for (const [kind, enabled] of [
+      ["at", config[TELEGRAM_KEYS.mentionEnabled]],
+      ["reply", config[TELEGRAM_KEYS.replyEnabled]]
+    ]) {
+      if (enabled) {
+        try {
+          await checkForNewNodeSeekActivity(config, kind);
+        } catch (error) {
+          errors.push(`${kind === "at" ? "提及" : "回复"}：${error?.message || "检查失败"}`);
+        }
       }
     }
     await chrome.storage.local.set({
@@ -183,8 +246,14 @@ async function checkForNewNodeSeekMessages(config) {
     if (isUnviewedMessage(message) && senderId && senderId !== currentUserId) {
       const sender = String(message.sender_name || "NodeSeek 用户").trim();
       const body = normalizeTelegramMessageBody(message.content);
-      const chatUrl = `${TELEGRAM_DIRECT_MESSAGE_URL}&to=${encodeURIComponent(String(message.sender_id || ""))}`;
-      const text = `NodeSeek 新私信\n发件人：${sender}\n\n${body || "（消息没有文本内容）"}\n\n${chatUrl}`;
+      const chatUrl = buildTelegramDirectMessageUrl(message.sender_id);
+      const text = [
+        "NodeSeek 新私信",
+        `发件人：${sender}`,
+        "",
+        body || "（消息没有文本内容）",
+        ...(chatUrl ? ["", chatUrl] : [])
+      ].join("\n");
       await sendTelegramToTargets(config, text);
     }
 
@@ -193,6 +262,142 @@ async function checkForNewNodeSeekMessages(config) {
   }
 
   if (changed) await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
+}
+
+async function checkForNewNodeSeekActivity(config, kind) {
+  const endpoint = TELEGRAM_ACTIVITY_ENDPOINTS[kind];
+  if (!endpoint) throw new Error("未知的通知类型");
+
+  const cursorState = await chrome.storage.local.get({ [TELEGRAM_KEYS.mentionReplyCursors]: {} });
+  const storedCursors = cursorState[TELEGRAM_KEYS.mentionReplyCursors];
+  const cursor = normalizeTelegramActivityCursor(storedCursors?.[kind]);
+  const wasInitialized = cursor.initialized;
+  const knownIds = new Set(cursor.ids);
+  const discoveredIds = [];
+  const candidates = [];
+  const candidateIds = new Set();
+  const pageSignatures = new Set();
+  let reachedKnownEntry = false;
+
+  for (let page = 1; page <= TELEGRAM_ACTIVITY_PAGE_LIMIT; page += 1) {
+    const response = await fetch(`${endpoint}?page=${page}`, {
+      credentials: "include",
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) throw new Error(`NodeSeek 接口返回 HTTP ${response.status}`);
+    const result = await response.json();
+    if (result?.success !== true || !Array.isArray(result.data)) {
+      throw new Error("NodeSeek 通知接口响应格式异常");
+    }
+    const entries = result.data;
+    if (entries.length === 0) break;
+
+    const pageIds = entries.map((entry) => normalizeTelegramActivityId(entry?.id)).filter(Boolean);
+    const signature = pageIds.join(",");
+    if (!signature || pageSignatures.has(signature)) break;
+    pageSignatures.add(signature);
+
+    for (const entry of entries) {
+      const id = normalizeTelegramActivityId(entry?.id);
+      if (!id) continue;
+      discoveredIds.push(id);
+      if (knownIds.has(id)) {
+        reachedKnownEntry = true;
+      } else if (wasInitialized && !candidateIds.has(id)) {
+        candidateIds.add(id);
+        candidates.push(entry);
+      }
+    }
+
+    if (reachedKnownEntry || entries.length < TELEGRAM_ACTIVITY_PAGE_SIZE) break;
+  }
+
+  // First activation records existing notifications without sending historical alerts.
+  if (!wasInitialized) {
+    await saveTelegramActivityCursor(kind, discoveredIds, cursor);
+    return;
+  }
+
+  const unreadEntries = candidates.filter(isUnviewedMessage);
+  let currentUserId = "";
+  if (unreadEntries.length > 0) {
+    currentUserId = String((await fetchLuckyCurrentUser("https://www.nodeseek.com/"))?.member_id || "").trim();
+    if (!currentUserId) {
+      throw new Error("无法确认当前 NodeSeek 账号，已跳过通知以避免误报");
+    }
+    if (unreadEntries.some((entry) => !normalizeTelegramActivityId(entry?.commenter_id))) {
+      throw new Error("通知缺少作者 ID，已跳过发送以避免误报");
+    }
+  }
+
+  // Entries from the API are newest-first; send oldest-first when a poll finds several.
+  for (const entry of unreadEntries.reverse()) {
+    const commenterId = normalizeTelegramActivityId(entry.commenter_id);
+    if (commenterId === currentUserId) continue;
+    await sendTelegramToTargets(config, formatTelegramActivityNotification(kind, entry));
+  }
+
+  await saveTelegramActivityCursor(kind, discoveredIds, cursor);
+}
+
+function normalizeTelegramActivityCursor(value) {
+  const ids = Array.isArray(value?.ids)
+    ? [...new Set(value.ids.map(normalizeTelegramActivityId).filter(Boolean))].slice(0, TELEGRAM_ACTIVITY_CURSOR_LIMIT)
+    : [];
+  return { initialized: value?.initialized === true, ids };
+}
+
+function normalizeTelegramActivityId(value) {
+  const id = String(value ?? "").trim();
+  return /^\d+$/.test(id) ? id : "";
+}
+
+async function saveTelegramActivityCursor(kind, discoveredIds, previousCursor) {
+  const latest = await chrome.storage.local.get({ [TELEGRAM_KEYS.mentionReplyCursors]: {} });
+  const storedCursors = latest[TELEGRAM_KEYS.mentionReplyCursors];
+  const prior = normalizeTelegramActivityCursor(previousCursor);
+  const ids = [...new Set([
+    ...discoveredIds,
+    ...(prior.initialized ? prior.ids : [])
+  ])].slice(0, TELEGRAM_ACTIVITY_CURSOR_LIMIT);
+  const cursors = { ...(storedCursors || {}), [kind]: { initialized: true, ids } };
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.mentionReplyCursors]: cursors });
+}
+
+function formatTelegramActivityNotification(kind, entry) {
+  const isMention = kind === "at";
+  const postUrl = buildTelegramNotificationPostUrl(entry);
+  const author = String(entry.commenter_name || "NodeSeek 用户").trim().slice(0, 80);
+  const title = normalizeTelegramMessageBody(entry.title || "NodeSeek 帖子").slice(0, 300);
+  const content = normalizeTelegramMessageBody(entry.content || "").slice(0, 500);
+  const lines = [
+    isMention ? "NodeSeek 有人提及你" : "NodeSeek 有人回复你",
+    `用户：${author}`,
+    `主题：${title || "NodeSeek 帖子"}`
+  ];
+  if (content) lines.push(`内容：${content}`);
+  if (postUrl) lines.push(postUrl);
+  return lines.join("\n");
+}
+
+function buildTelegramDirectMessageUrl(senderId) {
+  const userId = String(senderId ?? "").replace(/\D/g, "");
+  return userId ? `${TELEGRAM_DIRECT_MESSAGE_URL}${encodeURIComponent(userId)}` : "";
+}
+
+function buildTelegramNotificationPostUrl(entry) {
+  const postId = String(entry?.post_id || "").replace(/\D/g, "");
+  if (!postId) return "";
+
+  const floor = entry?.floor_id ?? entry?.floor_index;
+  const floorNumber = Number(floor);
+  const pageNumber = Number.isInteger(floorNumber) && floorNumber > 0
+    ? Math.ceil(floorNumber / TELEGRAM_ACTIVITY_PAGE_SIZE)
+    : 1;
+  const url = new URL(`https://www.nodeseek.com/post-${postId}-${pageNumber}`);
+  if (entry.comment_id != null) url.searchParams.set("nshComment", String(entry.comment_id));
+  if (floor != null) url.searchParams.set("nshFloor", String(floor));
+  return url.href;
 }
 
 async function checkRssPosts(config) {

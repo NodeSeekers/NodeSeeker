@@ -51,9 +51,15 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     "telegramTargets",
     "telegramMessageNotificationsEnabled",
     "telegramPostNotificationsEnabled",
+    "telegramMentionNotificationsEnabled",
+    "telegramReplyNotificationsEnabled",
+    "telegramMonitorIntervalSeconds",
     "telegramMonitorPaused"
   ].some((key) => changes[key])) {
-    scheduleTelegramMonitorAlarm(Boolean(changes.telegramMessageNotificationsEnabled))
+    const resetMessageBaseline = changes.telegramMessageNotificationsEnabled?.newValue === true;
+    const resetMentionBaseline = changes.telegramMentionNotificationsEnabled?.newValue === true;
+    const resetReplyBaseline = changes.telegramReplyNotificationsEnabled?.newValue === true;
+    scheduleTelegramMonitorAlarm(resetMessageBaseline, resetMentionBaseline, resetReplyBaseline)
       .then(() => checkTelegramNotifications())
       .catch((error) => {
         console.warn("Telegram alarm setup failed:", error?.message || "unknown error");

@@ -42,6 +42,9 @@ const PRELOADED_CONFIG_STORAGE_KEYS = Object.freeze([
   "levelColors",
   "telegramMessageNotificationsEnabled",
   "telegramPostNotificationsEnabled",
+  "telegramMentionNotificationsEnabled",
+  "telegramReplyNotificationsEnabled",
+  "telegramMonitorIntervalSeconds",
   "telegramBotToken",
   "telegramTargets",
   "telegramKeywordRules",
@@ -49,6 +52,7 @@ const PRELOADED_CONFIG_STORAGE_KEYS = Object.freeze([
   "telegramBoardSlugs",
   "telegramMonitorPaused",
   "telegramMessageCursors",
+  "telegramMentionReplyCursors",
   "telegramRssInitialized",
   "telegramRssSeenIds"
 ]);

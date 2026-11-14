@@ -732,14 +732,90 @@ form {
   margin: 0;
 }
 
-.telegram-section > #toggleTelegramPause {
-  justify-self: start;
-}
-
 .telegram-notification-toggles {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
+}
+
+.telegram-section.telegram-monitor-status-card {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--options-accent);
+  border-radius: 8px;
+}
+
+.telegram-section.telegram-monitor-status-card.is-paused {
+  border-color: var(--options-danger);
+}
+
+.telegram-monitor-status-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.telegram-monitor-status-button.is-monitoring {
+  color: var(--options-accent);
+  border-color: var(--options-accent);
+}
+
+.telegram-monitor-status-button.is-paused {
+  color: var(--options-danger);
+  border-color: var(--options-danger);
+}
+
+.telegram-monitor-switch {
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 22px;
+  padding: 3px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--options-switch-off);
+  transition: background-color 150ms ease;
+}
+
+.telegram-monitor-switch > span {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px var(--options-thumb-shadow);
+  transition: transform 150ms ease;
+}
+
+.telegram-monitor-status-button.is-monitoring .telegram-monitor-switch {
+  background: var(--options-accent);
+}
+
+.telegram-monitor-status-button.is-monitoring .telegram-monitor-switch > span {
+  transform: translateX(18px);
+}
+
+.telegram-monitor-status-button.is-paused .telegram-monitor-switch {
+  background: var(--options-danger);
+}
+
+.telegram-monitor-interval {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.telegram-monitor-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.telegram-monitor-interval select {
+  width: auto;
+  min-width: 130px;
 }
 
 .telegram-target-form {

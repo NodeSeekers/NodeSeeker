@@ -47,7 +47,7 @@
 
 | **🏷️ 标记数据** | **🧭 阅读导航** | **✈️ Telegram 监控** | **🧹 内容管理** |
 |---|---|---|---|
-| ![标记数据设置](https://cdn.nodeimage.com/i/CqEBn3ihouhehErmEzYNJ5ZQFPSiyAke.png) | ![阅读导航设置](https://cdn.nodeimage.com/i/Yl2wNhGbiCobc3JesJNJXUfiRqqiA0Vn.png) | ![✈️ Telegram 监控设置](https://cdn.nodeimage.com/i/AnT0FbkOCNQ3qpcsRYNaqL92vGoQZCKk.png) | ![内容管理设置](https://cdn.nodeimage.com/i/xU0UPOtAjJJMUTTHGOlrFXYVXa4zrYrW.png) |
+| ![标记数据设置](https://cdn.nodeimage.com/i/CqEBn3ihouhehErmEzYNJ5ZQFPSiyAke.png) | ![阅读导航设置](https://cdn.nodeimage.com/i/Yl2wNhGbiCobc3JesJNJXUfiRqqiA0Vn.png) | ![✈️ Telegram 监控设置](https://cdn.nodeimage.com/i/cv93N6Q83SMcKpkgEUU59Xl0oVkDIvQl.webp) | ![内容管理设置](https://cdn.nodeimage.com/i/xU0UPOtAjJJMUTTHGOlrFXYVXa4zrYrW.png) |
 | **🖼️ 图床配置** | **🎁 抽奖通知** | **👣 访问足迹** |
 | ![图床设置](https://cdn.nodeimage.com/i/Ihyjh4NjNLOkK72bWuYCVL7zSAfNI0jq.png) | ![抽奖通知设置](https://cdn.nodeimage.com/i/4L1PuQp9QN2O84Vk7hp0hXArHkuiEoW9.png) | ![访问足迹设置](https://cdn.nodeimage.com/i/4xZ7jB115NC4qtETabLGEx2rEtd5TAVr.png) |  |
 

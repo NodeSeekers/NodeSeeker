@@ -52,7 +52,16 @@ async function importConfigFromFile(event) {
 }
 
 async function buildConfigImportOptions(payload) {
-  const importedValues = extractConfigPayload(payload);
+  const importedValues = { ...extractConfigPayload(payload) };
+  if (typeof importedValues.telegramMentionReplyNotificationsEnabled === "boolean") {
+    if (!Object.hasOwn(importedValues, "telegramMentionNotificationsEnabled")) {
+      importedValues.telegramMentionNotificationsEnabled = importedValues.telegramMentionReplyNotificationsEnabled;
+    }
+    if (!Object.hasOwn(importedValues, "telegramReplyNotificationsEnabled")) {
+      importedValues.telegramReplyNotificationsEnabled = importedValues.telegramMentionReplyNotificationsEnabled;
+    }
+    delete importedValues.telegramMentionReplyNotificationsEnabled;
+  }
   const currentTelegramConfig = await chrome.storage.local.get(TELEGRAM_SYNC_CONFIG_DEFAULTS);
   return pickSyncConfigOptions(normalizeSyncConfigOptions({
     ...currentTelegramConfig,

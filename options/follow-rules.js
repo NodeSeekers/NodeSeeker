@@ -587,13 +587,15 @@ function createFollowRuleKeywordEditor(group) {
   title.className = "follow-rule-field-label";
   title.textContent = "关键词";
   const hint = document.createElement("small");
-  hint.textContent = "每次添加生成一条独立规则；组内任一规则命中即可。";
+  hint.id = "followKeywordRuleHint";
+  hint.textContent = "每次添加生成一条独立规则；排除词按“或”匹配，任一命中则此规则不触发。";
   heading.append(title, hint);
 
   const entry = document.createElement("div");
   entry.className = "follow-rule-keyword-entry";
   const keywordInput = createFollowRuleKeywordInput("items", "命中词，例如：台湾, 家宽");
   const excludeInput = createFollowRuleKeywordInput("excludeItems", "排除词，例如：已出, 求购");
+  excludeInput.setAttribute("aria-describedby", hint.id);
   const editingRule = group.rules.find((rule) => rule.id === pendingFollowRuleEditor.editingRuleId);
   if (editingRule) {
     keywordInput.value = editingRule.terms.join(", ");

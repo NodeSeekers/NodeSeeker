@@ -139,6 +139,10 @@ async function restoreTelegramConfig() {
   const config = await chrome.storage.local.get({
     telegramMessageNotificationsEnabled: true,
     telegramPostNotificationsEnabled: true,
+    telegramMentionNotificationsEnabled: null,
+    telegramReplyNotificationsEnabled: null,
+    telegramMentionReplyNotificationsEnabled: null,
+    telegramMonitorIntervalSeconds: 60,
     telegramBotToken: "",
     telegramChatId: "",
     telegramTargets: [],
@@ -153,6 +157,21 @@ async function restoreTelegramConfig() {
     telegramRssHistory: [],
     telegramNotificationDefaultsMigrationV1: false
   });
+  const mentionNotificationsEnabled = typeof config.telegramMentionNotificationsEnabled === "boolean"
+    ? config.telegramMentionNotificationsEnabled
+    : config.telegramMentionReplyNotificationsEnabled === true;
+  const replyNotificationsEnabled = typeof config.telegramReplyNotificationsEnabled === "boolean"
+    ? config.telegramReplyNotificationsEnabled
+    : config.telegramMentionReplyNotificationsEnabled === true;
+  if (typeof config.telegramMentionNotificationsEnabled !== "boolean"
+      || typeof config.telegramReplyNotificationsEnabled !== "boolean"
+      || config.telegramMentionReplyNotificationsEnabled !== null) {
+    await chrome.storage.local.set({
+      telegramMentionNotificationsEnabled: mentionNotificationsEnabled,
+      telegramReplyNotificationsEnabled: replyNotificationsEnabled
+    });
+    await chrome.storage.local.remove("telegramMentionReplyNotificationsEnabled");
+  }
   document.querySelector("#telegramBotToken").value = config.telegramBotToken;
   telegramTargets = normalizeTelegramTargets(config.telegramTargets);
   if (telegramTargets.length === 0 && config.telegramChatId) {
@@ -170,7 +189,9 @@ async function restoreTelegramConfig() {
   const hasEnabledTarget = telegramTargets.some((target) => target.enabled !== false && target.chatId);
   if (!config.telegramNotificationDefaultsMigrationV1 && hasEnabledTarget) {
     if (config.telegramMessageNotificationsEnabled === false
-        && config.telegramPostNotificationsEnabled === false) {
+        && config.telegramPostNotificationsEnabled === false
+        && !mentionNotificationsEnabled
+        && !replyNotificationsEnabled) {
       config.telegramMessageNotificationsEnabled = true;
       config.telegramPostNotificationsEnabled = true;
       await chrome.storage.local.set({
@@ -182,6 +203,11 @@ async function restoreTelegramConfig() {
   }
   document.querySelector("#telegramMessageNotificationsEnabled").checked = config.telegramMessageNotificationsEnabled;
   document.querySelector("#telegramPostNotificationsEnabled").checked = config.telegramPostNotificationsEnabled;
+  document.querySelector("#telegramMentionNotificationsEnabled").checked = mentionNotificationsEnabled;
+  document.querySelector("#telegramReplyNotificationsEnabled").checked = replyNotificationsEnabled;
+  const monitorIntervalSeconds = Number(config.telegramMonitorIntervalSeconds);
+  document.querySelector("#telegramMonitorIntervalSeconds").value =
+    [30, 60, 300, 900].includes(monitorIntervalSeconds) ? String(monitorIntervalSeconds) : "60";
   telegramKeywordRules = normalizeTelegramKeywordRules(config.telegramKeywordRules);
   renderTelegramKeywordRules();
   document.querySelector("#telegramBlockedKeywords").value = config.telegramBlockedKeywords.join("\n");
@@ -239,6 +265,9 @@ document.querySelector("#telegramDirectTopicMenu").addEventListener("click", han
 document.querySelector("#telegramBotToken").addEventListener("input", handleTelegramBotTokenInput);
 document.querySelector("#telegramMessageNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramPostNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
+document.querySelector("#telegramMentionNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
+document.querySelector("#telegramReplyNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
+document.querySelector("#telegramMonitorIntervalSeconds").addEventListener("change", saveTelegramMonitorInterval);
 document.querySelector("#telegramBlockedKeywords").addEventListener("input", scheduleTelegramConfigSave);
 document.querySelectorAll("[data-telegram-board]").forEach((input) => {
   input.addEventListener("change", scheduleTelegramConfigSave);
@@ -410,6 +439,8 @@ async function saveTelegramConfig({ silent = false } = {}) {
   telegramConfigSaveTimer = 0;
   const enabled = document.querySelector("#telegramMessageNotificationsEnabled").checked;
   const postsEnabled = document.querySelector("#telegramPostNotificationsEnabled").checked;
+  const mentionEnabled = document.querySelector("#telegramMentionNotificationsEnabled").checked;
+  const replyEnabled = document.querySelector("#telegramReplyNotificationsEnabled").checked;
   const token = document.querySelector("#telegramBotToken").value.trim();
   if (token && (telegramTokenValidationState !== "valid" || token !== telegramValidatedToken)) {
     if (!silent) showToast("请先验证 Bot Token", "error");
@@ -419,6 +450,8 @@ async function saveTelegramConfig({ silent = false } = {}) {
     await chrome.storage.local.set({
       telegramMessageNotificationsEnabled: enabled,
       telegramPostNotificationsEnabled: postsEnabled,
+      telegramMentionNotificationsEnabled: mentionEnabled,
+      telegramReplyNotificationsEnabled: replyEnabled,
       telegramBotToken: token,
       telegramTargets,
       telegramKeywordRules,
@@ -430,6 +463,21 @@ async function saveTelegramConfig({ silent = false } = {}) {
   } catch (error) {
     showToast(formatToastError(error, "保存 Telegram 配置失败"), "error");
     return false;
+  }
+}
+
+async function saveTelegramMonitorInterval() {
+  const select = document.querySelector("#telegramMonitorIntervalSeconds");
+  const intervalSeconds = Number(select.value);
+  if (![30, 60, 300, 900].includes(intervalSeconds)) {
+    showToast("请选择有效的检查间隔", "error");
+    return;
+  }
+  try {
+    await chrome.storage.local.set({ telegramMonitorIntervalSeconds: intervalSeconds });
+    showToast(`检查间隔已设为${intervalSeconds < 60 ? `${intervalSeconds} 秒` : `${intervalSeconds / 60} 分钟`}`);
+  } catch (error) {
+    showToast(formatToastError(error, "保存检查间隔失败"), "error");
   }
 }
 
@@ -1062,7 +1110,16 @@ async function toggleTelegramPause() {
 }
 
 function renderTelegramMonitorStatus(config) {
-  document.querySelector("#toggleTelegramPause").textContent = config.telegramMonitorPaused ? "恢复监控" : "暂停监控";
+  const paused = Boolean(config.telegramMonitorPaused);
+  const card = document.querySelector("#telegramMonitorStatusCard");
+  const button = document.querySelector("#toggleTelegramPause");
+  card.classList.toggle("is-monitoring", !paused);
+  card.classList.toggle("is-paused", paused);
+  button.classList.toggle("is-monitoring", !paused);
+  button.classList.toggle("is-paused", paused);
+  button.setAttribute("aria-checked", String(!paused));
+  button.setAttribute("aria-label", `监控状态：${paused ? "已关闭" : "已开启"}`);
+  button.title = paused ? "点击开启监控" : "点击关闭监控";
 }
 
 function renderTelegramHistory(history) {
@@ -1155,9 +1212,13 @@ async function resetTelegramHistory() {
 
 async function resetTelegramConfig() {
   const telegramKeys = [
-    "telegramMessageNotificationsEnabled", "telegramPostNotificationsEnabled", "telegramBotToken", "telegramTargets",
+    "telegramMessageNotificationsEnabled", "telegramPostNotificationsEnabled",
+    "telegramMentionNotificationsEnabled", "telegramReplyNotificationsEnabled", "telegramMentionReplyNotificationsEnabled",
+    "telegramMonitorIntervalSeconds",
+    "telegramBotToken", "telegramTargets",
     "telegramChatId", "telegramKeywordRules", "telegramBlockedKeywords", "telegramBoardSlugs",
     "telegramMessageCursors", "telegramRssSeenIds", "telegramRssInitialized", "telegramRssHistory",
+    "telegramMentionReplyCursors",
     "telegramMonitorPaused", "telegramMonitorLastCheck", "telegramMonitorLastError",
     "telegramPendingDirectTopics", "telegramPendingPersonalChatId", "telegramPendingPersonalTargetName",
     "telegramPersonalStartWatchUntil", "telegramPersonalStartWatchSince", "telegramPersonalStartOffset",
@@ -1173,6 +1234,9 @@ async function resetTelegramConfig() {
     document.querySelector("#telegramTargetType").value = "personal";
     document.querySelector("#telegramMessageNotificationsEnabled").checked = true;
     document.querySelector("#telegramPostNotificationsEnabled").checked = true;
+    document.querySelector("#telegramMentionNotificationsEnabled").checked = false;
+    document.querySelector("#telegramReplyNotificationsEnabled").checked = false;
+    document.querySelector("#telegramMonitorIntervalSeconds").value = "60";
     document.querySelector("#telegramBlockedKeywords").value = "";
     document.querySelectorAll("[data-telegram-board]").forEach((input) => { input.checked = true; });
     telegramTargets = [];
