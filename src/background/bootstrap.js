@@ -4,7 +4,7 @@ scheduleProfileRetentionPrune();
 scheduleTelegramMonitorAlarm();
 scheduleAutoAttendanceAlarm();
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   importPreloadedConfiguration()
     .catch((error) => {
       console.warn("Bundled configuration import failed:", error?.message || "unknown error");
@@ -13,7 +13,7 @@ chrome.runtime.onInstalled.addListener(() => {
       discardLegacyStorage();
       scheduleLuckyNotificationAlarmSync();
       scheduleProfileRetentionPrune();
-      scheduleTelegramMonitorAlarm();
+      scheduleTelegramMonitorAlarm({ checkImmediately: details?.reason === "update" });
       scheduleAutoAttendanceAlarm();
     });
 });
@@ -56,10 +56,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     "telegramMonitorIntervalSeconds",
     "telegramMonitorPaused"
   ].some((key) => changes[key])) {
-    const resetMessageBaseline = changes.telegramMessageNotificationsEnabled?.newValue === true;
-    const resetMentionBaseline = changes.telegramMentionNotificationsEnabled?.newValue === true;
-    const resetReplyBaseline = changes.telegramReplyNotificationsEnabled?.newValue === true;
-    scheduleTelegramMonitorAlarm(resetMessageBaseline, resetMentionBaseline, resetReplyBaseline)
+    chrome.storage.local.get({
+      telegramBotToken: "",
+      telegramTargets: [],
+      telegramMessageNotificationsEnabled: true,
+      telegramPostNotificationsEnabled: true,
+      telegramMentionNotificationsEnabled: null,
+      telegramReplyNotificationsEnabled: null,
+      telegramMentionReplyNotificationsEnabled: null,
+      telegramMonitorPaused: false
+    })
+      .then((config) => scheduleTelegramMonitorAlarm(getTelegramBaselineResetOptions(changes, config)))
       .then(() => checkTelegramNotifications())
       .catch((error) => {
         console.warn("Telegram alarm setup failed:", error?.message || "unknown error");

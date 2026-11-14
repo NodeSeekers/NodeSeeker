@@ -22,6 +22,168 @@ function createSandbox(fetch = global.fetch) {
   return sandbox;
 }
 
+test("Telegram baselines reset for a re-enabled child or a newly ready monitor", () => {
+  const sandbox = createSandbox();
+  const target = { type: "personal", chatId: "333", enabled: true };
+  const config = {
+    telegramBotToken: "123456:secret",
+    telegramTargets: [target],
+    telegramMessageNotificationsEnabled: true,
+    telegramPostNotificationsEnabled: true,
+    telegramMentionNotificationsEnabled: true,
+    telegramReplyNotificationsEnabled: true,
+    telegramMonitorPaused: false
+  };
+  const replyEnabled = vm.runInContext(`getTelegramBaselineResetOptions(
+    ${JSON.stringify({ telegramReplyNotificationsEnabled: { oldValue: false, newValue: true } })},
+    ${JSON.stringify(config)}
+  )`, sandbox);
+  expect(replyEnabled).toEqual({
+    resetMessageBaseline: false,
+    resetPostBaseline: false,
+    resetMentionBaseline: false,
+    resetReplyBaseline: true
+  });
+
+  const postsEnabled = vm.runInContext(`getTelegramBaselineResetOptions(
+    ${JSON.stringify({ telegramPostNotificationsEnabled: { oldValue: false, newValue: true } })},
+    ${JSON.stringify(config)}
+  )`, sandbox);
+  expect(postsEnabled).toEqual({
+    resetMessageBaseline: false,
+    resetPostBaseline: true,
+    resetMentionBaseline: false,
+    resetReplyBaseline: false
+  });
+
+  const monitorResumed = vm.runInContext(`getTelegramBaselineResetOptions(
+    ${JSON.stringify({ telegramMonitorPaused: { oldValue: true, newValue: false } })},
+    ${JSON.stringify(config)}
+  )`, sandbox);
+  expect(monitorResumed).toEqual({
+    resetMessageBaseline: true,
+    resetPostBaseline: true,
+    resetMentionBaseline: true,
+    resetReplyBaseline: true
+  });
+
+  const targetRestored = vm.runInContext(`getTelegramBaselineResetOptions(
+    ${JSON.stringify({ telegramTargets: { oldValue: [], newValue: [target] } })},
+    ${JSON.stringify(config)}
+  )`, sandbox);
+  expect(targetRestored).toEqual({
+    resetMessageBaseline: true,
+    resetPostBaseline: true,
+    resetMentionBaseline: true,
+    resetReplyBaseline: true
+  });
+});
+
+test("Telegram monitor rebaseline clears RSS seen IDs and immediately checks", async () => {
+  const stored = {
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageNotificationsEnabled: false,
+    telegramPostNotificationsEnabled: true,
+    telegramMentionNotificationsEnabled: false,
+    telegramReplyNotificationsEnabled: false,
+    telegramMonitorIntervalSeconds: 30,
+    telegramMonitorPaused: false,
+    telegramRssSeenIds: ["old-post"],
+    telegramRssInitialized: true,
+    telegramRssHistory: [{ id: "preserved-history" }]
+  };
+  let monitorChecks = 0;
+  let alarm;
+  const sandbox = createSandbox();
+  sandbox.TELEGRAM_MESSAGE_ALARM_NAME = "nshTelegram:monitor";
+  sandbox.checkTelegramNotifications = () => {
+    monitorChecks += 1;
+    return Promise.resolve();
+  };
+  sandbox.chrome = {
+    storage: { local: {
+      get: async (defaults) => ({ ...defaults, ...stored }),
+      set: async (values) => Object.assign(stored, values),
+      remove: async () => {}
+    } },
+    alarms: {
+      clear: async () => {},
+      create: (...args) => { alarm = args; }
+    }
+  };
+
+  await vm.runInContext("scheduleTelegramMonitorAlarm({ resetPostBaseline: true })", sandbox);
+
+  expect(stored.telegramRssSeenIds).toEqual([]);
+  expect(stored.telegramRssInitialized).toBe(false);
+  expect(stored.telegramRssHistory).toEqual([{ id: "preserved-history" }]);
+  expect(monitorChecks).toBe(1);
+  expect(alarm).toEqual(["nshTelegram:monitor", { delayInMinutes: 0.5, periodInMinutes: 0.5 }]);
+});
+
+test("Telegram update check preserves established baselines", async () => {
+  const stored = {
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageNotificationsEnabled: false,
+    telegramPostNotificationsEnabled: true,
+    telegramMentionNotificationsEnabled: false,
+    telegramReplyNotificationsEnabled: false,
+    telegramMonitorPaused: false,
+    telegramMonitorIntervalSeconds: 60,
+    telegramMessageCursors: { "conversation": "last-message" },
+    telegramRssSeenIds: ["known-post"],
+    telegramRssInitialized: true
+  };
+  let monitorChecks = 0;
+  const removedKeys = [];
+  const sandbox = createSandbox();
+  sandbox.TELEGRAM_MESSAGE_ALARM_NAME = "nshTelegram:monitor";
+  sandbox.checkTelegramNotifications = () => {
+    monitorChecks += 1;
+    return Promise.resolve();
+  };
+  sandbox.chrome = {
+    storage: { local: {
+      get: async (defaults) => ({ ...defaults, ...stored }),
+      set: async (values) => Object.assign(stored, values),
+      remove: async (keys) => { removedKeys.push(keys); }
+    } },
+    alarms: { clear: async () => {}, create: async () => {} }
+  };
+
+  await vm.runInContext("scheduleTelegramMonitorAlarm({ checkImmediately: true })", sandbox);
+
+  expect(monitorChecks).toBe(1);
+  expect(removedKeys).toEqual([]);
+  expect(stored.telegramMessageCursors).toEqual({ conversation: "last-message" });
+  expect(stored.telegramRssSeenIds).toEqual(["known-post"]);
+  expect(stored.telegramRssInitialized).toBe(true);
+});
+
+test("first reply check establishes baseline without sending existing unread replies", async () => {
+  const entry = { id: 321, viewed: 0, commenter_id: 123, post_id: 456, title: "existing reply" };
+  const stored = { telegramMentionReplyCursors: {} };
+  const requestedUrls = [];
+  let sentCount = 0;
+  const sandbox = createSandbox(async (url) => {
+    requestedUrls.push(url);
+    return { ok: true, json: async () => ({ success: true, data: [entry] }) };
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.sendTelegramToTargets = async () => { sentCount += 1; };
+
+  await vm.runInContext('checkForNewNodeSeekActivity({ telegramBotToken: "token", telegramTargets: [] }, "reply")', sandbox);
+
+  expect(requestedUrls).toEqual(["https://www.nodeseek.com/api/notification/reply-to-me/list?page=1"]);
+  expect(sentCount).toBe(0);
+  expect(stored.telegramMentionReplyCursors.reply).toEqual({ initialized: true, ids: ["321"] });
+});
+
 test("RSS parser extracts NodeSeek post IDs, links, titles, and board names", () => {
   const sandbox = createSandbox();
   const xml = `<rss><channel><item><title><![CDATA[v.ps with gen2]]></title>

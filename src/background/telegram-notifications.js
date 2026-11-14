@@ -69,9 +69,13 @@ async function getTelegramUpdateConflictMessage(token) {
 }
 
 async function scheduleTelegramMonitorAlarm(
-  resetMessageBaseline = false,
-  resetMentionBaseline = false,
-  resetReplyBaseline = false
+  {
+    resetMessageBaseline = false,
+    resetPostBaseline = false,
+    resetMentionBaseline = false,
+    resetReplyBaseline = false,
+    checkImmediately = false
+  } = {}
 ) {
   const config = await chrome.storage.local.get({
     [TELEGRAM_KEYS.token]: "",
@@ -99,22 +103,19 @@ async function scheduleTelegramMonitorAlarm(
     });
     await chrome.storage.local.remove("telegramMentionReplyNotificationsEnabled");
   }
-  const targets = Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [];
-  const hasTarget = targets.some((target) => target?.enabled !== false && target?.chatId);
-  const ready = config[TELEGRAM_KEYS.token].trim() && hasTarget
-    && !config[TELEGRAM_KEYS.paused]
-    && (config[TELEGRAM_KEYS.messagesEnabled]
-      || config[TELEGRAM_KEYS.postsEnabled]
-      || config[TELEGRAM_KEYS.mentionEnabled]
-      || config[TELEGRAM_KEYS.replyEnabled]);
-
-  if (!ready) {
+  if (!isTelegramMonitorReady(config)) {
     await chrome.alarms.clear(TELEGRAM_MESSAGE_ALARM_NAME);
     return;
   }
 
   if (resetMessageBaseline) {
     await chrome.storage.local.remove(TELEGRAM_KEYS.messageCursors);
+  }
+  if (resetPostBaseline) {
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.rssSeenIds]: [],
+      [TELEGRAM_KEYS.rssInitialized]: false
+    });
   }
   if (resetMentionBaseline || resetReplyBaseline) {
     const storedCursors = await chrome.storage.local.get({ [TELEGRAM_KEYS.mentionReplyCursors]: {} });
@@ -131,11 +132,55 @@ async function scheduleTelegramMonitorAlarm(
     delayInMinutes: intervalInMinutes,
     periodInMinutes: intervalInMinutes
   });
-  if (resetMessageBaseline || resetMentionBaseline || resetReplyBaseline) {
+  if (resetMessageBaseline || resetPostBaseline || resetMentionBaseline || resetReplyBaseline || checkImmediately) {
     checkTelegramNotifications().catch((error) => {
       console.warn("Telegram notification baseline failed:", error?.message || "unknown error");
     });
   }
+}
+
+function isTelegramMonitorReady(config) {
+  const targets = Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [];
+  const hasEnabledTarget = targets.some((target) => target?.enabled !== false && target?.chatId);
+  const mentionEnabled = typeof config[TELEGRAM_KEYS.mentionEnabled] === "boolean"
+    ? config[TELEGRAM_KEYS.mentionEnabled]
+    : config.telegramMentionReplyNotificationsEnabled === true;
+  const replyEnabled = typeof config[TELEGRAM_KEYS.replyEnabled] === "boolean"
+    ? config[TELEGRAM_KEYS.replyEnabled]
+    : config.telegramMentionReplyNotificationsEnabled === true;
+  return Boolean(String(config[TELEGRAM_KEYS.token] || "").trim())
+    && hasEnabledTarget
+    && !config[TELEGRAM_KEYS.paused]
+    && (config[TELEGRAM_KEYS.messagesEnabled]
+      || config[TELEGRAM_KEYS.postsEnabled]
+      || mentionEnabled
+      || replyEnabled);
+}
+
+function getTelegramBaselineResetOptions(changes, currentConfig) {
+  const defaults = {
+    [TELEGRAM_KEYS.token]: "",
+    [TELEGRAM_KEYS.targets]: [],
+    [TELEGRAM_KEYS.messagesEnabled]: true,
+    [TELEGRAM_KEYS.postsEnabled]: true,
+    [TELEGRAM_KEYS.mentionEnabled]: false,
+    [TELEGRAM_KEYS.replyEnabled]: false,
+    telegramMentionReplyNotificationsEnabled: null,
+    [TELEGRAM_KEYS.paused]: false
+  };
+  const previousConfig = { ...defaults, ...currentConfig };
+  for (const key of Object.keys(defaults)) {
+    if (Object.hasOwn(changes, key)) {
+      previousConfig[key] = changes[key]?.oldValue === undefined ? defaults[key] : changes[key].oldValue;
+    }
+  }
+  const monitorBecameReady = !isTelegramMonitorReady(previousConfig) && isTelegramMonitorReady(currentConfig);
+  return {
+    resetMessageBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.messagesEnabled]?.newValue === true,
+    resetPostBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.postsEnabled]?.newValue === true,
+    resetMentionBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.mentionEnabled]?.newValue === true,
+    resetReplyBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.replyEnabled]?.newValue === true
+  };
 }
 
 async function checkTelegramNotifications() {
@@ -280,7 +325,7 @@ async function checkForNewNodeSeekActivity(config, kind) {
   let reachedKnownEntry = false;
 
   for (let page = 1; page <= TELEGRAM_ACTIVITY_PAGE_LIMIT; page += 1) {
-    const response = await fetch(`${endpoint}?page=${page}`, {
+    const response = await fetch(`https://www.nodeseek.com${endpoint}?page=${page}`, {
       credentials: "include",
       headers: { Accept: "application/json" }
     });
