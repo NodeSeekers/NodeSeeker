@@ -49,16 +49,45 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if ([
     "telegramBotToken",
     "telegramTargets",
+    "telegramManagedTopics",
     "telegramMessageNotificationsEnabled",
     "telegramPostNotificationsEnabled",
     "telegramMentionNotificationsEnabled",
     "telegramReplyNotificationsEnabled",
     "telegramMonitorIntervalSeconds",
-    "telegramMonitorPaused"
+    "telegramRssMonitorIntervalSeconds",
+    "telegramKeywordRules",
+    "telegramBlockedKeywords",
+    "telegramBoardSlugs",
+    "telegramMonitorPaused",
+    "telegramPersonalStartWatchUntil"
   ].some((key) => changes[key])) {
+    const shouldCheckNodeSeek = [
+      "telegramBotToken",
+      "telegramTargets",
+      "telegramManagedTopics",
+      "telegramMessageNotificationsEnabled",
+      "telegramMentionNotificationsEnabled",
+      "telegramReplyNotificationsEnabled",
+      "telegramKeywordRules",
+      "telegramBlockedKeywords",
+      "telegramBoardSlugs",
+      "telegramMonitorPaused"
+    ].some((key) => changes[key]);
+    const shouldCheckRss = [
+      "telegramBotToken",
+      "telegramTargets",
+      "telegramPostNotificationsEnabled",
+      "telegramKeywordRules",
+      "telegramBlockedKeywords",
+      "telegramBoardSlugs",
+      "telegramRssMonitorIntervalSeconds",
+      "telegramMonitorPaused"
+    ].some((key) => changes[key]);
     chrome.storage.local.get({
       telegramBotToken: "",
       telegramTargets: [],
+      telegramManagedTopics: [],
       telegramMessageNotificationsEnabled: true,
       telegramPostNotificationsEnabled: true,
       telegramMentionNotificationsEnabled: null,
@@ -67,7 +96,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       telegramMonitorPaused: false
     })
       .then((config) => scheduleTelegramMonitorAlarm(getTelegramBaselineResetOptions(changes, config)))
-      .then(() => checkTelegramNotifications())
+      .then(() => Promise.all([
+        ...(shouldCheckNodeSeek ? [checkTelegramNotifications()] : []),
+        ...(shouldCheckRss ? [checkTelegramRssNotifications()] : [])
+      ]))
       .catch((error) => {
         console.warn("Telegram alarm setup failed:", error?.message || "unknown error");
       });
@@ -81,6 +113,21 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === TELEGRAM_MESSAGE_ALARM_NAME) {
     checkTelegramNotifications().catch((error) => {
       console.warn("Telegram monitor failed:", error?.message || "unknown error");
+    });
+  }
+  if (TELEGRAM_FAST_MONITOR_ALARM_NAMES.includes(alarm.name)) {
+    checkTelegramNotifications().catch((error) => {
+      console.warn("Telegram monitor failed:", error?.message || "unknown error");
+    });
+  }
+  if (alarm.name === TELEGRAM_RSS_ALARM_NAME) {
+    checkTelegramRssNotifications().catch((error) => {
+      console.warn("Telegram RSS monitor failed:", error?.message || "unknown error");
+    });
+  }
+  if (alarm.name === TELEGRAM_UPDATES_WATCHDOG_ALARM_NAME) {
+    ensureTelegramUpdatesLongPoll().catch((error) => {
+      console.warn("Telegram long-poll recovery failed:", error?.message || "unknown error");
     });
   }
   if (alarm.name === TELEGRAM_PERSONAL_START_ALARM_NAME) {
@@ -122,6 +169,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "telegram:deleteManagedTopics") {
+    deleteTelegramManagedTopics(message.payload?.topicIds)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
   if (message.type === "telegram:openBot") {
     getTelegramBotLink()
     .then(async (url) => {
@@ -137,17 +191,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     stopTelegramPersonalStartWatch()
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === "telegram:checkPersonalStartWatch") {
-    checkTelegramPersonalStartWatch()
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => {
-        const messageText = error?.message || String(error);
-        chrome.runtime.sendMessage({ type: "telegram:personalStartWatchError", error: messageText }).catch(() => {});
-        sendResponse({ ok: false, error: messageText });
-      });
     return true;
   }
 

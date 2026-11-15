@@ -45,6 +45,7 @@ const PRELOADED_CONFIG_STORAGE_KEYS = Object.freeze([
   "telegramMentionNotificationsEnabled",
   "telegramReplyNotificationsEnabled",
   "telegramMonitorIntervalSeconds",
+  "telegramRssMonitorIntervalSeconds",
   "telegramBotToken",
   "telegramTargets",
   "telegramKeywordRules",

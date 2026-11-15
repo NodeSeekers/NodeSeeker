@@ -69,6 +69,7 @@
     "https://rss.nodeseek.com/*",
     "https://api.drand.sh/*",
     "https://api.nodeimage.com/*",
+    "https://www.nodeimage.com/*",
     "https://api.telegram.org/*"
   ],
   "icons": {
@@ -83,8 +84,9 @@
   "permissions": [
     "alarms",
     "notifications",
+    "scripting",
     "storage",
     "unlimitedStorage"
   ],
-  "version": "1.0.29"
+  "version": "1.0.33"
 }

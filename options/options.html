@@ -420,6 +420,7 @@
 
           <section id="telegramConfigGroup" class="config-group telegram-config-group" aria-labelledby="telegramMessageTitle">
             <h3 id="telegramMessageTitle">Telegram 通知</h3>
+            <p class="config-description">个人接收目标会把私信、回复、提及和系统通知分 Topic；从私信 Topic 回信前，请在 BotFather 的 Threads Settings 开启 Threaded Mode。频道 Direct 保持原有通知方式。</p>
             <div class="telegram-section telegram-token-section">
               <label><span>Bot Token</span><input id="telegramBotToken" type="password" autocomplete="off" spellcheck="false"></label>
               <div class="telegram-token-status-row">
@@ -485,10 +486,11 @@
                 </div>
                 <div class="telegram-monitor-controls">
                   <div class="telegram-monitor-interval">
-                    <label for="telegramMonitorIntervalSeconds">检查间隔</label>
+                    <label for="telegramMonitorIntervalSeconds">私信、提及、回复间隔</label>
                     <select id="telegramMonitorIntervalSeconds">
-                      <option value="30">30 秒</option>
-                      <option value="60" selected>1 分钟</option>
+                      <option value="10">10 秒</option>
+                      <option value="30" selected>30 秒</option>
+                      <option value="60">1 分钟</option>
                       <option value="300">5 分钟</option>
                       <option value="900">15 分钟</option>
                     </select>
@@ -542,7 +544,7 @@
 
               <section class="telegram-section telegram-history-section" aria-labelledby="telegramHistoryTitle">
                 <div class="telegram-history-heading">
-                  <h4 id="telegramHistoryTitle">最近推送</h4>
+                  <h4 id="telegramHistoryTitle">监控推送</h4>
                   <div class="telegram-history-actions" hidden>
                     <button id="telegramHistoryReset" type="button">重置</button>
                     <button id="telegramHistorySelectAll" type="button">全选</button>
@@ -551,6 +553,17 @@
                   </div>
                 </div>
                 <ul id="telegramRssHistory" class="telegram-target-list" aria-label="最近 Telegram 推送"></ul>
+              </section>
+              <section class="telegram-section telegram-managed-topics-section" aria-labelledby="telegramManagedTopicsTitle">
+                <div class="telegram-history-heading">
+                  <h4 id="telegramManagedTopicsTitle">对话管理</h4>
+                  <div id="telegramManagedTopicActions" class="telegram-history-actions" hidden>
+                    <button id="telegramTopicSelectAll" type="button">全选</button>
+                    <button id="telegramTopicDeleteSelected" type="button" disabled>删除</button>
+                    <button id="telegramTopicDone" type="button">完成</button>
+                  </div>
+                </div>
+                <ul id="telegramManagedTopics" class="telegram-managed-topic-list" aria-label="插件创建的 Telegram 对话"></ul>
               </section>
               </div>
 

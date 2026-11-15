@@ -24,6 +24,13 @@ const STORE_META = "meta";
 const PROFILE_TEXT_FIELDS = ["readme"];
 const LUCKY_ALARM_NAME = "nshLucky:next";
 const TELEGRAM_MESSAGE_ALARM_NAME = "nshTelegram:monitor";
+const TELEGRAM_FAST_MONITOR_ALARM_NAMES = Object.freeze([
+  "nshTelegram:monitor-10s-1",
+  "nshTelegram:monitor-10s-2",
+  "nshTelegram:monitor-10s-3"
+]);
+const TELEGRAM_RSS_ALARM_NAME = "nshTelegram:rss";
+const TELEGRAM_UPDATES_WATCHDOG_ALARM_NAME = "nshTelegram:updates-watchdog";
 const TELEGRAM_PERSONAL_START_ALARM_NAME = "nshTelegram:personal-start";
 const LEGACY_LUCKY_ALARM_PREFIX = "nshLucky:";
 const LUCKY_NOTIFICATION_PREFIX = "nshLuckyNotification:";

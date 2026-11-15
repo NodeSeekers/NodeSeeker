@@ -11,9 +11,23 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
-test("typing a Bot Token autosaves incomplete Telegram setup without an error toast", () => {
+test("typing a Bot Token schedules automatic validation without a separate button", () => {
   const calls = [];
+  const delays = [];
   const sandbox = vm.createContext({
+    window: {
+      clearTimeout: () => {},
+      setTimeout: (_callback, delay) => {
+        delays.push(delay);
+        return 1;
+      }
+    },
+    document: { querySelector: () => ({ value: "test-token" }) },
+    telegramTokenValidationTimer: 0,
+    telegramTokenValidationRequestId: 0,
+    telegramValidatedToken: "previous-token",
+    telegramTokenValidationState: "valid",
+    setTelegramTokenStatus: (...args) => calls.push({ status: args }),
     syncTelegramSetupVisibility: () => calls.push("sync visibility"),
     scheduleTelegramConfigSave: (options) => calls.push({ save: options })
   });
@@ -21,9 +35,12 @@ test("typing a Bot Token autosaves incomplete Telegram setup without an error to
   vm.runInContext("handleTelegramBotTokenInput()", sandbox);
 
   expect(Array.from(calls)).toEqual([
-    "sync visibility",
-    { save: { allowIncompleteConfig: true, silent: true } }
+    { status: ["输入完成后自动验证…", "checking"] },
+    "sync visibility"
   ]);
+  expect(delays).toEqual([650]);
+  expect(sandbox.telegramValidatedToken).toBe("");
+  expect(calls.filter((call) => typeof call === "object" && "save" in call)).toHaveLength(0);
 });
 
 test("Telegram keyword inputs split on commas, 和, and whitespace while preserving symbols", () => {
