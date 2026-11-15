@@ -660,10 +660,19 @@ async function checkForNewNodeSeekActivity(config, kind) {
   }
 
   // Entries from the API are newest-first; send oldest-first when a poll finds several.
-  for (const entry of unreadEntries.reverse()) {
-    const commenterId = normalizeTelegramActivityId(entry.commenter_id);
-    if (commenterId === currentUserId) continue;
-    await sendTelegramActivityNotification(config, kind, formatTelegramActivityNotification(kind, entry));
+  const notificationEntries = unreadEntries.reverse().filter((entry) => {
+    return normalizeTelegramActivityId(entry.commenter_id) !== currentUserId;
+  });
+  const activityContents = await fetchTelegramActivityCommentContents(notificationEntries);
+  for (const entry of notificationEntries) {
+    const commentId = normalizeTelegramActivityId(entry.comment_id);
+    const extracted = activityContents.get(commentId);
+    const content = String(extracted?.reply || entry.content || "");
+    await sendTelegramActivityNotification(config, kind, formatTelegramActivityNotification(kind, {
+      ...entry,
+      quote: extracted?.quote || "",
+      content
+    }));
   }
 
   await saveTelegramActivityCursor(kind, discoveredIds, cursor);
@@ -679,6 +688,37 @@ function normalizeTelegramActivityCursor(value) {
 function normalizeTelegramActivityId(value) {
   const id = String(value ?? "").trim();
   return /^\d+$/.test(id) ? id : "";
+}
+
+async function fetchTelegramActivityCommentContents(entries) {
+  const comments = entries
+    .filter((entry) => !String(entry?.content || "").trim())
+    .map((entry) => {
+      const postId = normalizeTelegramActivityId(entry?.post_id);
+      const commentId = normalizeTelegramActivityId(entry?.comment_id);
+      if (!postId || !commentId) return null;
+      const floor = Number(entry?.floor_id ?? entry?.floor_index);
+      const pageNumber = Number.isInteger(floor) && floor > 0
+        ? Math.ceil(floor / TELEGRAM_ACTIVITY_PAGE_SIZE)
+        : 1;
+      return { postId, commentId, pageNumber };
+    })
+    .filter(Boolean);
+  if (comments.length === 0) return new Map();
+
+  try {
+    const result = await requestNodeSeekTelegramPage("fetch-activity-comment-contents", { comments });
+    return new Map((Array.isArray(result?.contents) ? result.contents : [])
+      .filter((item) => normalizeTelegramActivityId(item?.commentId)
+        && (typeof item?.quote === "string" || typeof item?.reply === "string"))
+      .map((item) => [normalizeTelegramActivityId(item.commentId), {
+        quote: String(item.quote || ""),
+        reply: String(item.reply || "")
+      }]));
+  } catch (error) {
+    console.warn("Telegram activity comment content lookup failed:", error?.message || "unknown error");
+    return new Map();
+  }
 }
 
 async function saveTelegramActivityCursor(kind, discoveredIds, previousCursor) {
@@ -698,6 +738,7 @@ function formatTelegramActivityNotification(kind, entry) {
   const postUrl = buildTelegramNotificationPostUrl(entry);
   const author = String(entry.commenter_name || "NodeSeek 用户").trim().slice(0, 80);
   const title = normalizeTelegramMessageBody(entry.title || "NodeSeek 帖子").slice(0, 300);
+  const quote = normalizeTelegramMessageBody(entry.quote || "").slice(0, 500);
   const content = normalizeTelegramMessageBody(entry.content || "").slice(0, 500);
   const lines = [
     isMention ? "NodeSeek 有人提及你" : "NodeSeek 有人回复你",
@@ -705,7 +746,8 @@ function formatTelegramActivityNotification(kind, entry) {
     `主题：${title || "NodeSeek 帖子"}`
   ];
   if (postUrl) lines.push(postUrl);
-  if (content) lines.push(`内容：${content}`);
+  if (quote) lines.push(`引用: ${quote}`);
+  if (content) lines.push(`回复: ${content}`);
   return lines.join("\n");
 }
 
@@ -1139,7 +1181,7 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { 
   const topicName = kind === "reply" ? "回复"
     : kind === "mention" ? "提及"
       : kind === "system" ? "系统通知"
-        : kind === "rss" ? "关注推送" : dmTopicName;
+        : kind === "rss" ? "监控" : dmTopicName;
   if (!token || !chatId || !topicName || (kind === "dm" && !nsUserId)) {
     throw new Error("创建 Telegram 对话缺少必要信息");
   }
@@ -1158,7 +1200,7 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { 
     && String(topic.chatId) === chatId
     && (kind !== "dm" || String(topic.nsUserId) === nsUserId));
   if (existing) {
-    if (kind === "dm" && existing.name !== topicName) {
+    if ((kind === "dm" || kind === "rss") && existing.name !== topicName) {
       try {
         const renameResponse = await fetch(`https://api.telegram.org/bot${token}/editForumTopic`, {
           method: "POST",

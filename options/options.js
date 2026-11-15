@@ -1223,7 +1223,7 @@ function renderTelegramManagedTopics(value) {
     kind.textContent = topic.kind === "dm" ? "私信"
       : topic.kind === "reply" ? "回复通知"
         : topic.kind === "system" ? "系统通知"
-          : topic.kind === "rss" ? "关注推送" : "提及通知";
+          : topic.kind === "rss" ? "监控" : "提及通知";
     item.append(checkbox, name);
     if (kind.textContent !== name.textContent) item.append(kind);
     list.appendChild(item);

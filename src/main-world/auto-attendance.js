@@ -105,7 +105,73 @@
       return { marked: unreadIds.length };
     }
 
+    if (detail.operation === "fetch-activity-comment-contents") {
+      return fetchTelegramActivityCommentContents(detail.comments);
+    }
+
     throw new Error("未知的 NodeSeek 页面请求");
+  }
+
+  async function fetchTelegramActivityCommentContents(values) {
+    const comments = (Array.isArray(values) ? values : []).map((item) => {
+      const postId = String(item?.postId || "").trim();
+      const commentId = String(item?.commentId || "").trim();
+      const pageNumber = Number(item?.pageNumber);
+      if (!/^\d+$/.test(postId) || !/^\d+$/.test(commentId)
+          || !Number.isSafeInteger(pageNumber) || pageNumber < 1) return null;
+      return { postId, commentId, pageNumber };
+    }).filter(Boolean);
+    const pageGroups = new Map();
+    for (const comment of comments) {
+      const key = `${comment.postId}:${comment.pageNumber}`;
+      if (!pageGroups.has(key)) pageGroups.set(key, []);
+      pageGroups.get(key).push(comment);
+    }
+
+    const contents = [];
+    for (const pageComments of pageGroups.values()) {
+      const { postId, pageNumber } = pageComments[0];
+      let parsedDocument;
+      try {
+        const response = await fetch(`/post-${postId}-${pageNumber}`, {
+          credentials: "include",
+          cache: "no-store"
+        });
+        if (!response.ok) continue;
+        parsedDocument = new DOMParser().parseFromString(await response.text(), "text/html");
+      } catch (_error) {
+        continue;
+      }
+
+      const commentItems = [...parsedDocument.querySelectorAll("li.content-item[data-comment-id]")];
+      for (const comment of pageComments) {
+        const item = commentItems.find((node) => node.getAttribute("data-comment-id") === comment.commentId);
+        const article = item?.querySelector("article.post-content");
+        if (!article) {
+          contents.push({ commentId: comment.commentId, quote: "", reply: "" });
+          continue;
+        }
+
+        const quoteBlocks = [...article.querySelectorAll("blockquote")]
+          .filter((node) => !node.parentElement?.closest("blockquote"));
+        const quote = quoteBlocks.map((node) => node.textContent || "")
+          .map(normalizeTelegramActivityCommentText)
+          .filter(Boolean)
+          .join("\n");
+        const replyArticle = article.cloneNode(true);
+        replyArticle.querySelectorAll("blockquote").forEach((node) => node.remove());
+        const reply = normalizeTelegramActivityCommentText(replyArticle.textContent || "");
+        contents.push({ commentId: comment.commentId, quote, reply });
+      }
+    }
+    return { contents };
+  }
+
+  function normalizeTelegramActivityCommentText(value) {
+    return String(value || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function getAutoAttendanceDateKey(timestamp) {
