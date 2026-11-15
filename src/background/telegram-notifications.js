@@ -31,6 +31,19 @@ const TELEGRAM_ACTIVITY_PAGE_LIMIT = 20;
 const TELEGRAM_ACTIVITY_PAGE_SIZE = 10;
 const TELEGRAM_OUTGOING_ECHO_LIMIT = 200;
 const TELEGRAM_OUTGOING_ECHO_TTL_MS = 2 * 60 * 60 * 1000;
+const TELEGRAM_TOPIC_STYLES = Object.freeze({
+  system: Object.freeze({ name: "系统", iconCustomEmojiId: "5309984423003823246", iconColor: 16766590 }),
+  rss: Object.freeze({ name: "监控", iconCustomEmojiId: "5309965701241379366", iconColor: 9367192 }),
+  mention: Object.freeze({ name: "提及", iconCustomEmojiId: "5379748062124056162", iconColor: 16478047 }),
+  reply: Object.freeze({ name: "回复", iconCustomEmojiId: "5417915203100613993", iconColor: 13338331 }),
+  dm: Object.freeze({ name: "", iconColor: 7322096 })
+});
+const TELEGRAM_DM_TOPIC_ANIMAL_ICONS = Object.freeze([
+  Object.freeze({ emoji: "🐈", customEmojiId: "5235912661102773458" }),
+  Object.freeze({ emoji: "🦮", customEmojiId: "5237999392438371490" }),
+  Object.freeze({ emoji: "🐟", customEmojiId: "5384574037701696503" }),
+  Object.freeze({ emoji: "🦄", customEmojiId: "5413625003218313783" })
+]);
 const TELEGRAM_MONITOR_INTERVAL_SECONDS = Object.freeze([10, 30, 60, 300, 900]);
 const TELEGRAM_RSS_INTERVAL_SECONDS = Object.freeze([30, 60, 300, 900]);
 const TELEGRAM_RSS_INTERVAL_KEY = "telegramRssMonitorIntervalSeconds";
@@ -494,7 +507,9 @@ async function checkForNewNodeSeekMessages(config) {
       await chrome.storage.local.set({ [TELEGRAM_KEYS.systemNotificationUserId]: systemNotificationUserId });
     }
   }
-  if (systemNotificationUserId) await normalizeManagedSystemTopics(systemNotificationUserId);
+  if (systemNotificationUserId) {
+    await normalizeManagedSystemTopics(config[TELEGRAM_KEYS.token], systemNotificationUserId);
+  }
 
   const cursors = config[TELEGRAM_KEYS.messageCursors];
   const nextCursors = { ...(cursors || {}) };
@@ -565,7 +580,15 @@ async function checkForNewNodeSeekMessages(config) {
           || String(message.sender_name || "").trim() === "系统通知"
           || String(message.receiver_name || "").trim() === "系统通知";
         const messageContent = extractTelegramMessageMedia(incomingMessage.content);
-        const body = messageContent.text || (messageContent.imageUrls.length ? "" : "（消息没有文本内容）");
+        const messageBody = messageContent.text || (messageContent.imageUrls.length ? "" : "（消息没有文本内容）");
+        const isFollowedUserPost = isSystemNotification && isIncoming
+          && String(incomingMessage.content || "").includes("关注的用户");
+        const originalPost = isFollowedUserPost
+          ? await fetchTelegramSystemNotificationPostContent(incomingMessage.content)
+          : null;
+        const body = originalPost
+          ? formatTelegramSystemPostNotificationBody(messageBody, originalPost)
+          : messageBody;
         const fallbackText = isOutgoing
           ? ["NodeSeek 私信", "发送者：我", `对话：${peerName}`, ...(body ? ["", body] : [])].join("\n")
           : ["NodeSeek 新私信", `发件人：${peerName}`, ...(body ? ["", body] : [])].join("\n");
@@ -692,7 +715,6 @@ function normalizeTelegramActivityId(value) {
 
 async function fetchTelegramActivityCommentContents(entries) {
   const comments = entries
-    .filter((entry) => !String(entry?.content || "").trim())
     .map((entry) => {
       const postId = normalizeTelegramActivityId(entry?.post_id);
       const commentId = normalizeTelegramActivityId(entry?.comment_id);
@@ -706,19 +728,17 @@ async function fetchTelegramActivityCommentContents(entries) {
     .filter(Boolean);
   if (comments.length === 0) return new Map();
 
-  try {
-    const result = await requestNodeSeekTelegramPage("fetch-activity-comment-contents", { comments });
-    return new Map((Array.isArray(result?.contents) ? result.contents : [])
-      .filter((item) => normalizeTelegramActivityId(item?.commentId)
-        && (typeof item?.quote === "string" || typeof item?.reply === "string"))
-      .map((item) => [normalizeTelegramActivityId(item.commentId), {
-        quote: String(item.quote || ""),
-        reply: String(item.reply || "")
-      }]));
-  } catch (error) {
-    console.warn("Telegram activity comment content lookup failed:", error?.message || "unknown error");
-    return new Map();
-  }
+  const result = await requestNodeSeekTelegramPage("fetch-activity-comment-contents", { comments });
+  const contents = new Map((Array.isArray(result?.contents) ? result.contents : [])
+    .filter((item) => normalizeTelegramActivityId(item?.commentId)
+      && (typeof item?.quote === "string" || typeof item?.reply === "string"))
+    .map((item) => [normalizeTelegramActivityId(item.commentId), {
+      quote: String(item.quote || ""),
+      reply: String(item.reply || "")
+    }]));
+  const missingComment = comments.find((comment) => !contents.has(comment.commentId));
+  if (missingComment) throw new Error("NodeSeek 通知楼层正文缺失，稍后重试");
+  return contents;
 }
 
 async function saveTelegramActivityCursor(kind, discoveredIds, previousCursor) {
@@ -990,6 +1010,45 @@ function normalizeTelegramMessageBody(value) {
     .replace(/\s*\n\s*/g, "\n").trim().slice(0, 3300);
 }
 
+function extractNodeSeekSystemPostReference(value) {
+  const candidates = String(value || "").match(/https?:\/\/[^\s)<>"']+/gi) || [];
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate.replace(/[.,!?;]+$/, ""));
+      if (url.hostname !== "www.nodeseek.com" && url.hostname !== "nodeseek.com") continue;
+      const match = url.pathname.match(/^\/post-(\d+)(?:-(\d+))?\/?$/);
+      if (!match) continue;
+      return { postId: match[1], pageNumber: Number(match[2] || 1) };
+    } catch (_error) {
+      // Ignore malformed and non-NodeSeek links.
+    }
+  }
+  return null;
+}
+
+async function fetchTelegramSystemNotificationPostContent(value) {
+  const reference = extractNodeSeekSystemPostReference(value);
+  if (!reference) throw new Error("无法识别关注帖链接，稍后重试");
+  const result = await requestNodeSeekTelegramPage("fetch-system-post-content", reference);
+  const title = normalizeTelegramMessageBody(result?.title || "").slice(0, 300);
+  const body = typeof result?.body === "string"
+    ? normalizeTelegramMessageBody(result.body).slice(0, 2400)
+    : null;
+  if (!title || body === null) throw new Error("NodeSeek 关注帖标题或正文暂时无法读取，稍后重试");
+  return { title, body };
+}
+
+function formatTelegramSystemPostNotificationBody(messageBody, post) {
+  const original = String(messageBody || "")
+    .replace(/^\s*\[主题\]\s*:\s*$/gm, "")
+    .replace(/^\s*\[正文\]\s*:\s*$/gm, "")
+    .trim();
+  const lines = original ? [original, ""] : [];
+  if (post.title) lines.push(`主题：${post.title}`);
+  lines.push(`正文：${post.body || "（无文字正文）"}`);
+  return normalizeTelegramMessageBody(lines.join("\n"));
+}
+
 function extractTelegramMessageMedia(value) {
   const imageUrls = [];
   const addImageUrl = (value) => {
@@ -1130,7 +1189,8 @@ async function sendTelegramActivityNotification(config, kind, text) {
   for (const target of otherTargets) await sendTelegramMessage(config[TELEGRAM_KEYS.token], target, text);
 }
 
-async function normalizeManagedSystemTopics(systemUserIdValue) {
+async function normalizeManagedSystemTopics(tokenValue, systemUserIdValue) {
+  const token = String(tokenValue || "").trim();
   const systemUserId = String(systemUserIdValue || "").trim();
   if (!systemUserId) return;
   const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.managedTopics]: [] });
@@ -1140,12 +1200,96 @@ async function normalizeManagedSystemTopics(systemUserIdValue) {
       || (topic.kind === "dm" && String(topic.nsUserId) === systemUserId))
     .map((topic) => String(topic.chatId || "").trim())
     .filter(Boolean));
-  for (const chatId of chatIds) await normalizeManagedSystemTopic(chatId, systemUserId);
+  for (const chatId of chatIds) await normalizeManagedSystemTopic(chatId, systemUserId, token);
 }
 
-async function normalizeManagedSystemTopic(chatIdValue, systemUserIdValue) {
+function getManagedTelegramTopicStyle(topic) {
+  const baseStyle = TELEGRAM_TOPIC_STYLES[topic?.kind];
+  if (!baseStyle || topic.kind !== "dm") return baseStyle;
+
+  const currentIconId = String(topic.iconCustomEmojiId || "");
+  const storedAnimalStyle = topic.dmAnimalIconVersion === 1
+    ? TELEGRAM_DM_TOPIC_ANIMAL_ICONS.find((icon) => icon.customEmojiId === currentIconId)
+    : null;
+  const icon = storedAnimalStyle || TELEGRAM_DM_TOPIC_ANIMAL_ICONS[
+    Math.floor(Math.random() * TELEGRAM_DM_TOPIC_ANIMAL_ICONS.length)
+  ];
+  return { ...baseStyle, iconCustomEmojiId: icon.customEmojiId, dmAnimalIconVersion: 1 };
+}
+
+async function applyManagedTelegramTopicStyle(tokenValue, topic, nameValue) {
+  const token = String(tokenValue || "").trim();
+  const style = getManagedTelegramTopicStyle(topic);
+  if (!token || !style || !topic?.chatId || !topic?.topicId) return topic;
+
+  const name = String(nameValue ?? topic.name ?? "").trim().slice(0, 128);
+  const nameChanged = name && String(topic.name || "") !== name;
+  const iconChanged = String(topic.iconCustomEmojiId || "") !== style.iconCustomEmojiId;
+  const animalVersionChanged = topic.kind === "dm" && topic.dmAnimalIconVersion !== 1;
+  if (!nameChanged && !iconChanged && !animalVersionChanged) return topic;
+
+  try {
+    const payload = {
+      chat_id: topic.chatId,
+      message_thread_id: Number(topic.topicId),
+      ...(nameChanged ? { name } : {}),
+      ...(iconChanged ? { icon_custom_emoji_id: style.iconCustomEmojiId } : {})
+    };
+    const response = await fetch(`https://api.telegram.org/bot${token}/editForumTopic`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok || !result?.ok) return topic;
+
+    const updated = {
+      ...topic,
+      ...(nameChanged ? { name } : {}),
+      ...(iconChanged ? { iconCustomEmojiId: style.iconCustomEmojiId } : {}),
+      ...(topic.kind === "dm" ? { dmAnimalIconVersion: 1 } : {})
+    };
+    const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.managedTopics]: [] });
+    const topics = Array.isArray(stored[TELEGRAM_KEYS.managedTopics]) ? stored[TELEGRAM_KEYS.managedTopics] : [];
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.managedTopics]: topics.map((item) => item.id === topic.id ? updated : item)
+    });
+    return updated;
+  } catch (_error) {
+    // Keep the topic usable if Telegram cannot update its icon or name.
+    return topic;
+  }
+}
+
+async function sendPendingTelegramUsernameCopyNotice(tokenValue, topic) {
+  if (topic?.kind !== "dm" || topic.usernameCopyNoticePending !== true) return topic;
+  const userName = String(topic.name || "").trim();
+  if (!userName) return topic;
+
+  try {
+    await sendTelegramMessage(
+      tokenValue,
+      { type: "personal", chatId: topic.chatId, topicId: topic.topicId },
+      `${userName} 开启了和你的私聊`,
+      [{ type: "code", offset: 0, length: userName.length }]
+    );
+    const updated = { ...topic, usernameCopyNoticePending: false };
+    const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.managedTopics]: [] });
+    const topics = Array.isArray(stored[TELEGRAM_KEYS.managedTopics]) ? stored[TELEGRAM_KEYS.managedTopics] : [];
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.managedTopics]: topics.map((item) => item.id === topic.id ? updated : item)
+    });
+    return updated;
+  } catch (_error) {
+    // Retry the copy notice on the next message if Telegram is temporarily unavailable.
+    return topic;
+  }
+}
+
+async function normalizeManagedSystemTopic(chatIdValue, systemUserIdValue, tokenValue = "") {
   const chatId = String(chatIdValue || "").trim();
   const systemUserId = String(systemUserIdValue || "").trim();
+  const token = String(tokenValue || "").trim();
   if (!chatId) return null;
   const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.managedTopics]: [] });
   const topics = Array.isArray(stored[TELEGRAM_KEYS.managedTopics]) ? stored[TELEGRAM_KEYS.managedTopics] : [];
@@ -1159,11 +1303,17 @@ async function normalizeManagedSystemTopic(chatIdValue, systemUserIdValue) {
   const reusedTopic = candidates[0];
   if (!reusedTopic) return null;
 
-  const canonicalTopic = { ...reusedTopic, kind: "system", nsUserId: "", name: "系统通知" };
+  const styledTopic = token
+    ? await applyManagedTelegramTopicStyle(token, { ...reusedTopic, kind: "system" }, "系统")
+    : reusedTopic;
+  let canonicalName = String(styledTopic.name || "");
+  if (!canonicalName) canonicalName = "系统";
+  const canonicalTopic = { ...styledTopic, kind: "system", nsUserId: "", name: canonicalName };
   const needsWrite = candidates.length !== 1
     || reusedTopic.kind !== "system"
     || String(reusedTopic.nsUserId || "") !== ""
-    || reusedTopic.name !== "系统通知";
+    || reusedTopic.name !== canonicalName
+    || reusedTopic.iconCustomEmojiId !== canonicalTopic.iconCustomEmojiId;
   if (needsWrite) {
     const firstCandidateIndex = topics.findIndex((topic) => candidates.includes(topic));
     const normalizedTopics = topics.filter((topic) => !candidates.includes(topic));
@@ -1178,11 +1328,9 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { 
   const chatId = String(chatIdValue || "").trim();
   const nsUserId = kind === "dm" ? String(userId || "").trim() : "";
   const dmTopicName = String(userName || "").trim().replace(/\s+/g, " ") || "NodeSeek 用户";
-  const topicName = kind === "reply" ? "回复"
-    : kind === "mention" ? "提及"
-      : kind === "system" ? "系统通知"
-        : kind === "rss" ? "监控" : dmTopicName;
-  if (!token || !chatId || !topicName || (kind === "dm" && !nsUserId)) {
+  const baseStyle = TELEGRAM_TOPIC_STYLES[kind];
+  const topicName = baseStyle?.name || dmTopicName;
+  if (!token || !chatId || !topicName || !baseStyle || (kind === "dm" && !nsUserId)) {
     throw new Error("创建 Telegram 对话缺少必要信息");
   }
 
@@ -1192,7 +1340,8 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { 
     const storedSystemUser = await chrome.storage.local.get({ [TELEGRAM_KEYS.systemNotificationUserId]: "" });
     const existingSystemTopic = await normalizeManagedSystemTopic(
       chatId,
-      storedSystemUser[TELEGRAM_KEYS.systemNotificationUserId]
+      storedSystemUser[TELEGRAM_KEYS.systemNotificationUserId],
+      token
     );
     if (existingSystemTopic) return existingSystemTopic;
   }
@@ -1200,32 +1349,20 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { 
     && String(topic.chatId) === chatId
     && (kind !== "dm" || String(topic.nsUserId) === nsUserId));
   if (existing) {
-    if ((kind === "dm" || kind === "rss") && existing.name !== topicName) {
-      try {
-        const renameResponse = await fetch(`https://api.telegram.org/bot${token}/editForumTopic`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, message_thread_id: Number(existing.topicId), name: topicName.slice(0, 128) })
-        });
-        const renameResult = await renameResponse.json();
-        if (renameResponse.ok && renameResult?.ok) {
-          const updated = { ...existing, name: topicName.slice(0, 128) };
-          await chrome.storage.local.set({
-            [TELEGRAM_KEYS.managedTopics]: topics.map((topic) => topic.id === existing.id ? updated : topic)
-          });
-          return updated;
-        }
-      } catch (_error) {
-        // Keep the existing topic usable even if Telegram cannot rename it.
-      }
-    }
-    return existing;
+    const styledTopic = await applyManagedTelegramTopicStyle(token, existing, topicName);
+    return sendPendingTelegramUsernameCopyNotice(token, styledTopic);
   }
 
+  const style = getManagedTelegramTopicStyle({ kind });
   const response = await fetch(`https://api.telegram.org/bot${token}/createForumTopic`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, name: topicName.slice(0, 128) })
+    body: JSON.stringify({
+      chat_id: chatId,
+      name: topicName.slice(0, 128),
+      icon_color: style.iconColor,
+      ...(style.iconCustomEmojiId ? { icon_custom_emoji_id: style.iconCustomEmojiId } : {})
+    })
   });
   const result = await response.json();
   const topicId = String(result?.result?.message_thread_id || "");
@@ -1239,11 +1376,15 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { 
     chatId,
     topicId,
     name: topicName.slice(0, 128),
+    iconCustomEmojiId: style.iconCustomEmojiId,
+    iconColor: style.iconColor,
+    ...(kind === "dm" ? { dmAnimalIconVersion: 1 } : {}),
     nsUserId,
+    ...(kind === "dm" && String(userName || "").trim() ? { usernameCopyNoticePending: true } : {}),
     createdAt: Date.now()
   };
   await chrome.storage.local.set({ [TELEGRAM_KEYS.managedTopics]: [...topics, topic] });
-  return topic;
+  return sendPendingTelegramUsernameCopyNotice(token, topic);
 }
 
 async function getTelegramUpdatesAndProcess(
@@ -2012,13 +2153,14 @@ async function sendTelegramPhoto(tokenValue, target, photoUrl, caption = "") {
   }
 }
 
-async function sendTelegramMessage(tokenValue, target, text) {
+async function sendTelegramMessage(tokenValue, target, text, entities = null) {
   const token = String(tokenValue || "").trim();
   if (!token || !target?.chatId) throw new Error("请填写 Bot Token 和目标 Chat ID");
   const payload = addTelegramTargetTopic({
     chat_id: target.chatId,
     text: String(text || "").slice(0, 4000),
-    disable_web_page_preview: true
+    disable_web_page_preview: true,
+    ...(Array.isArray(entities) && entities.length ? { entities } : {})
   }, target);
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",

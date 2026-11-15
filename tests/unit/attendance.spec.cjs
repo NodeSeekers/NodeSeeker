@@ -209,3 +209,138 @@ test("page-context check-in skips the POST when today's record already exists", 
   expect(response).toEqual({ ok: true, result: { gain: 4, alreadySigned: true } });
   expect(requests).toEqual([{ url: "/api/attendance/board?page=1", method: "GET" }]);
 });
+
+test("followed-post extraction reads the clean title instead of the pagination counter", async () => {
+  const contentSource = fs.readFileSync(path.resolve(__dirname, "../../src/content/auto-attendance.js"), "utf8");
+  const pageSource = fs.readFileSync(path.resolve(__dirname, "../../src/main-world/auto-attendance.js"), "utf8");
+  const requests = [];
+  const eventListeners = new Map();
+  let messageListener;
+  const window = {
+    addEventListener(type, callback) {
+      eventListeners.set(type, [...(eventListeners.get(type) || []), callback]);
+    },
+    removeEventListener(type, callback) {
+      eventListeners.set(type, (eventListeners.get(type) || []).filter((item) => item !== callback));
+    },
+    dispatchEvent(event) {
+      (eventListeners.get(event.type) || []).forEach((callback) => callback(event));
+    },
+    setTimeout,
+    clearTimeout
+  };
+  class MockCustomEvent {
+    constructor(type, options = {}) { this.type = type; this.detail = options.detail; }
+  }
+  class MockDOMParser {
+    parseFromString() {
+      return {
+        querySelector(selector) {
+          if (selector === ".post-title-link") return { textContent: "帖子标题" };
+          if (selector === ".post-title h1") return { textContent: "帖子标题 1" };
+          if (selector === '.content-item[id="0"] article.post-content') return { textContent: "帖子正文" };
+          return null;
+        }
+      };
+    }
+  }
+  const sandbox = vm.createContext({
+    chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
+    window,
+    CustomEvent: MockCustomEvent,
+    DOMParser: MockDOMParser,
+    fetch: async (url) => {
+      requests.push(url);
+      return { ok: true, text: async () => "<html></html>" };
+    },
+    Date,
+    Intl,
+    Number,
+    String
+  });
+  vm.runInContext(pageSource, sandbox);
+  vm.runInContext(contentSource, sandbox);
+
+  const response = await new Promise((resolve) => {
+    messageListener({
+      type: "telegram:nodeSeekPageRequest",
+      payload: { operation: "fetch-system-post-content", postId: "1056233", pageNumber: 1 }
+    }, {}, resolve);
+  });
+
+  expect(response).toEqual({ ok: true, result: { title: "帖子标题", body: "帖子正文" } });
+  expect(requests).toEqual(["/post-1056233-1"]);
+});
+
+test("activity page extraction separates a blockquote from the new comment text", async () => {
+  const contentSource = fs.readFileSync(path.resolve(__dirname, "../../src/content/auto-attendance.js"), "utf8");
+  const pageSource = fs.readFileSync(path.resolve(__dirname, "../../src/main-world/auto-attendance.js"), "utf8");
+  const requests = [];
+  const eventListeners = new Map();
+  let messageListener;
+  const window = {
+    addEventListener(type, callback) {
+      eventListeners.set(type, [...(eventListeners.get(type) || []), callback]);
+    },
+    removeEventListener(type, callback) {
+      eventListeners.set(type, (eventListeners.get(type) || []).filter((item) => item !== callback));
+    },
+    dispatchEvent(event) {
+      (eventListeners.get(event.type) || []).forEach((callback) => callback(event));
+    },
+    setTimeout,
+    clearTimeout
+  };
+  class MockCustomEvent {
+    constructor(type, options = {}) { this.type = type; this.detail = options.detail; }
+  }
+  const quoteNode = { textContent: "被引用的原文", parentElement: { closest: () => null } };
+  const article = {
+    querySelectorAll: () => [quoteNode],
+    cloneNode: () => ({
+      querySelectorAll: () => [{ remove() {} }],
+      textContent: "这是回复正文"
+    })
+  };
+  const commentNode = {
+    getAttribute: (name) => name === "data-comment-id" ? "301" : null,
+    querySelector: (selector) => selector === "article.post-content" ? article : null
+  };
+  class MockDOMParser {
+    parseFromString() {
+      return { querySelectorAll: (selector) => selector === "li.content-item[data-comment-id]" ? [commentNode] : [] };
+    }
+  }
+  const sandbox = vm.createContext({
+    chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
+    window,
+    CustomEvent: MockCustomEvent,
+    DOMParser: MockDOMParser,
+    fetch: async (url) => {
+      requests.push(url);
+      return { ok: true, status: 200, text: async () => "<html></html>" };
+    },
+    Date,
+    Intl,
+    Number,
+    String
+  });
+  vm.runInContext(pageSource, sandbox);
+  vm.runInContext(contentSource, sandbox);
+
+  const response = await new Promise((resolve) => {
+    messageListener({
+      type: "telegram:nodeSeekPageRequest",
+      payload: {
+        operation: "fetch-activity-comment-contents",
+        comments: [{ postId: "456", commentId: "301", pageNumber: 2 }]
+      }
+    }, {}, resolve);
+  });
+
+  expect(response).toEqual({
+    ok: true,
+    result: { contents: [{ commentId: "301", quote: "被引用的原文", reply: "这是回复正文" }] }
+  });
+  expect(requests).toEqual(["/post-456-2"]);
+});

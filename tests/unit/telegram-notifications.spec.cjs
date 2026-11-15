@@ -583,7 +583,126 @@ test("activity notification places the post link before mention or reply content
   })})`, sandbox);
 
   expect(text.indexOf("https://www.nodeseek.com/post-1054082-1")).toBeGreaterThan(-1);
-  expect(text.indexOf("内容：回复正文")).toBeGreaterThan(text.indexOf("https://www.nodeseek.com/post-1054082-1"));
+  expect(text.indexOf("回复: 回复正文")).toBeGreaterThan(text.indexOf("https://www.nodeseek.com/post-1054082-1"));
+});
+
+test("mention and reply notifications split quoted text from the new reply even when the API includes content", async () => {
+  for (const kind of ["at", "reply"]) {
+    const stored = {
+      telegramMentionReplyCursors: { [kind]: { initialized: true, ids: ["11"] } }
+    };
+    const entry = {
+      id: 12,
+      comment_id: 301,
+      post_id: 456,
+      floor_id: 11,
+      commenter_id: 99,
+      commenter_name: "Alice",
+      title: "主题标题",
+      content: "API 中的未拆分内容",
+      viewed: 0
+    };
+    const sent = [];
+    const pageRequests = [];
+    const sandbox = createSandbox(async () => ({
+      ok: true,
+      json: async () => ({ success: true, data: [entry] })
+    }));
+    sandbox.chrome = { storage: { local: {
+      get: async (defaults) => ({ ...defaults, ...stored }),
+      set: async (values) => Object.assign(stored, values)
+    } } };
+    sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+    sandbox.requestNodeSeekTelegramPage = async (operation, payload) => {
+      pageRequests.push({ operation, payload });
+      return { contents: [{ commentId: "301", quote: "引用的原文", reply: "新回复正文" }] };
+    };
+    sandbox.sendTelegramActivityNotification = async (_config, sentKind, text) => {
+      sent.push({ kind: sentKind, text });
+    };
+
+    await vm.runInContext(`checkForNewNodeSeekActivity({}, ${JSON.stringify(kind)})`, sandbox);
+
+    expect(pageRequests).toEqual([{
+      operation: "fetch-activity-comment-contents",
+      payload: { comments: [{ postId: "456", commentId: "301", pageNumber: 2 }] }
+    }]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].kind).toBe(kind);
+    expect(sent[0].text).toContain("引用: 引用的原文");
+    expect(sent[0].text).toContain("回复: 新回复正文");
+    expect(sent[0].text).not.toContain("API 中的未拆分内容");
+  }
+});
+
+test("activity extraction failure does not send incomplete alerts or advance the cursor", async () => {
+  const entry = {
+    id: 12, comment_id: 301, post_id: 456, floor_id: 11,
+    commenter_id: 99, commenter_name: "Alice", title: "主题标题", viewed: 0
+  };
+  const stored = { telegramMentionReplyCursors: { at: { initialized: true, ids: ["11"] } } };
+  const sent = [];
+  const sandbox = createSandbox(async () => ({
+    ok: true,
+    json: async () => ({ success: true, data: [entry] })
+  }));
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+  sandbox.requestNodeSeekTelegramPage = async () => { throw new Error("帖子页暂时无法读取"); };
+  sandbox.sendTelegramActivityNotification = async (...args) => { sent.push(args); };
+
+  await expect(Promise.resolve(vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox)))
+    .rejects.toThrow("帖子页暂时无法读取");
+
+  expect(sent).toHaveLength(0);
+  expect(stored.telegramMentionReplyCursors.at.ids).toEqual(["11"]);
+});
+
+test("followed-post extraction failure keeps the private-message cursor for retry", async () => {
+  const stored = {
+    telegramSystemNotificationUserId: "999",
+    telegramMessageCursors: { "999:777": "1" },
+    telegramManagedTopics: [{
+      id: "system-topic", kind: "system", chatId: "333", topicId: "456",
+      nsUserId: "", name: "系统", iconCustomEmojiId: "5309984423003823246"
+    }],
+    telegramOutgoingMessageEchoes: []
+  };
+  const sent = [];
+  const notification = "你关注的用户[Alice](https://www.nodeseek.com/space/99)发布了新帖(https://www.nodeseek.com/post-1056233-1)";
+  const sandbox = createSandbox(async (url) => {
+    if (url.endsWith("/api/notification/message/list")) {
+      return { ok: true, json: async () => ({ success: true, msgArray: [{
+        sender_id: "999", receiver_id: "777", sender_name: "系统通知", max_id: 2
+      }] }) };
+    }
+    if (url.endsWith("/api/notification/message/with/999")) {
+      return { ok: true, json: async () => ({ success: true, msgArray: [{
+        id: 2, sender_id: "999", receiver_id: "777", sender_name: "系统通知", content: notification
+      }] }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+  sandbox.requestNodeSeekTelegramPage = async () => { throw new Error("帖子页暂时无法读取"); };
+  sandbox.sendTelegramPrivateMessageToTopics = async (...args) => { sent.push(args); };
+
+  await expect(Promise.resolve(vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify({
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageCursors: stored.telegramMessageCursors,
+    telegramManagedTopics: stored.telegramManagedTopics
+  })})`, sandbox))).rejects.toThrow("帖子页暂时无法读取");
+
+  expect(sent).toHaveLength(0);
+  expect(stored.telegramMessageCursors["999:777"]).toBe("1");
 });
 
 test("Telegram-originated private reply is not mirrored back to its Telegram topic", async () => {
@@ -701,6 +820,97 @@ test("system topic normalization keeps one local mapping and reuses the existing
   }]);
 });
 
+test("managed topic categories use distinct icons and colors while user topics share one style", async () => {
+  const stored = { telegramManagedTopics: [] };
+  const createdTopics = [];
+  const copyNotices = [];
+  let nextTopicId = 500;
+  const sandbox = createSandbox(async (url, options = {}) => {
+    if (url.endsWith("/createForumTopic")) {
+      createdTopics.push(JSON.parse(options.body));
+      nextTopicId += 1;
+      return { ok: true, json: async () => ({ ok: true, result: { message_thread_id: nextTopicId } }) };
+    }
+    if (url.endsWith("/sendMessage")) {
+      copyNotices.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+
+  for (const kind of ["system", "rss", "mention", "reply", "dm"]) {
+    await vm.runInContext(`getOrCreateManagedTelegramTopic("token", "333", ${JSON.stringify(kind)}, {
+      userId: "222", userName: "Alice"
+    })`, sandbox);
+  }
+
+  expect(createdTopics).toEqual([
+    { chat_id: "333", name: "系统", icon_color: 16766590, icon_custom_emoji_id: "5309984423003823246" },
+    { chat_id: "333", name: "监控", icon_color: 9367192, icon_custom_emoji_id: "5309965701241379366" },
+    { chat_id: "333", name: "提及", icon_color: 16478047, icon_custom_emoji_id: "5379748062124056162" },
+    { chat_id: "333", name: "回复", icon_color: 13338331, icon_custom_emoji_id: "5417915203100613993" },
+    expect.objectContaining({ chat_id: "333", name: "Alice", icon_color: 7322096 })
+  ]);
+  expect([
+    "5235912661102773458",
+    "5237999392438371490",
+    "5384574037701696503",
+    "5413625003218313783"
+  ]).toContain(createdTopics[4].icon_custom_emoji_id);
+  expect(new Set(createdTopics.map((topic) => topic.icon_color)).size).toBe(5);
+  expect(stored.telegramManagedTopics.map((topic) => topic.name)).toEqual(["系统", "监控", "提及", "回复", "Alice"]);
+  expect(stored.telegramManagedTopics[4].dmAnimalIconVersion).toBe(1);
+  expect(copyNotices).toEqual([{
+    chat_id: "333",
+    message_thread_id: 505,
+    text: "Alice 开启了和你的私聊",
+    disable_web_page_preview: true,
+    entities: [{ type: "code", offset: 0, length: 5 }]
+  }]);
+});
+
+test("existing managed DM topics get one saved random animal icon without attempting to recolor", async () => {
+  const stored = {
+    telegramManagedTopics: [{
+      id: "dm-1", kind: "dm", chatId: "333", topicId: "456", nsUserId: "222", name: "Alice",
+      iconCustomEmojiId: "5370870893004203704"
+    }]
+  };
+  const editedTopics = [];
+  const sandbox = createSandbox(async (url, options = {}) => {
+    if (!url.endsWith("/editForumTopic")) throw new Error(`Unexpected request: ${url}`);
+    editedTopics.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  let randomCount = 0;
+  sandbox.Math = Object.create(Math);
+  sandbox.Math.random = () => { randomCount += 1; return 0; };
+
+  const topic = await vm.runInContext(`getOrCreateManagedTelegramTopic("token", "333", "dm", {
+    userId: "222", userName: "Alice"
+  })`, sandbox);
+  const repeatedTopic = await vm.runInContext(`getOrCreateManagedTelegramTopic("token", "333", "dm", {
+    userId: "222", userName: "Alice"
+  })`, sandbox);
+
+  expect(editedTopics).toEqual([{
+    chat_id: "333", message_thread_id: 456, icon_custom_emoji_id: "5235912661102773458"
+  }]);
+  expect(topic.iconCustomEmojiId).toBe("5235912661102773458");
+  expect(topic.dmAnimalIconVersion).toBe(1);
+  expect(repeatedTopic.iconCustomEmojiId).toBe(topic.iconCustomEmojiId);
+  expect(randomCount).toBe(1);
+  expect(editedTopics).toHaveLength(1);
+});
+
 test("private message sync mirrors both directions into one mapped user topic", async () => {
   const stored = {
     telegramManagedTopics: [],
@@ -754,7 +964,12 @@ test("private message sync mirrors both directions into one mapped user topic", 
     }
     if (url.endsWith("/createForumTopic")) {
       const body = JSON.parse(options.body);
-      expect(body).toEqual({ chat_id: "333", name: "Anderlille" });
+      expect(body).toEqual({
+        chat_id: "333",
+        name: "Anderlille",
+        icon_color: 7322096,
+        icon_custom_emoji_id: "5235912661102773458"
+      });
       return {
         ok: true,
         json: async () => ({ ok: true, result: { message_thread_id: 456 } })
@@ -771,6 +986,8 @@ test("private message sync mirrors both directions into one mapped user topic", 
     set: async (values) => Object.assign(stored, values)
   } } };
   sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+  sandbox.Math = Object.create(Math);
+  sandbox.Math.random = () => 0;
   const config = {
     telegramBotToken: "123456:secret",
     telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
@@ -781,9 +998,13 @@ test("private message sync mirrors both directions into one mapped user topic", 
   await vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify(config)})`, sandbox);
 
   expect(requestedUrls).toContain("https://www.nodeseek.com/api/notification/message/with/222");
-  expect(telegramSends).toHaveLength(2);
-  expect(telegramSends.map((message) => message.message_thread_id)).toEqual([456, 456]);
-  expect(telegramSends.map((message) => message.text)).toEqual(["我：我主动发出的消息", "对方回复的消息"]);
+  expect(telegramSends).toHaveLength(3);
+  expect(telegramSends.map((message) => message.message_thread_id)).toEqual([456, 456, 456]);
+  expect(telegramSends[0]).toMatchObject({
+    text: "Anderlille 开启了和你的私聊",
+    entities: [{ type: "code", offset: 0, length: 10 }]
+  });
+  expect(telegramSends.slice(1).map((message) => message.text)).toEqual(["我：我主动发出的消息", "对方回复的消息"]);
   expect(stored.telegramManagedTopics).toHaveLength(1);
   expect(stored.telegramManagedTopics[0]).toMatchObject({
     kind: "dm",
@@ -820,7 +1041,7 @@ test("overlapping Telegram monitor checks process a new private message once", a
   let releaseFetch;
   const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
   let listRequestCount = 0;
-  let sentCount = 0;
+  const sentMessages = [];
   const sandbox = createSandbox(async (url, options = {}) => {
     if (url === "https://www.nodeseek.com/api/notification/message/list") {
       listRequestCount += 1;
@@ -846,7 +1067,7 @@ test("overlapping Telegram monitor checks process a new private message once", a
       return { ok: true, json: async () => ({ ok: true, result: { message_thread_id: 456 } }) };
     }
     if (url.endsWith("/sendMessage")) {
-      sentCount += 1;
+      sentMessages.push(JSON.parse(options.body));
       return { ok: true, json: async () => ({ ok: true }) };
     }
     throw new Error(`Unexpected request: ${url}`);
@@ -863,7 +1084,12 @@ test("overlapping Telegram monitor checks process a new private message once", a
   await Promise.all([firstCheck, overlappingCheck]);
 
   expect(listRequestCount).toBe(1);
-  expect(sentCount).toBe(1);
+  expect(sentMessages).toHaveLength(2);
+  expect(sentMessages.map((message) => message.text)).toEqual([
+    "other-user 开启了和你的私聊",
+    "new message"
+  ]);
+  expect(sentMessages[0].entities).toEqual([{ type: "code", offset: 0, length: 10 }]);
   expect(stored.telegramMessageCursors["222:777"]).toBe("2");
 });
 

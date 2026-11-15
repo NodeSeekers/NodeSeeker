@@ -11,10 +11,21 @@ const child = spawn(chromium.executablePath(), [
   "--remote-debugging-port=9223",
   `--disable-extensions-except=${root}`,
   `--load-extension=${root}`,
-  "--start-minimized",
   "--window-position=-32000,-32000",
   "https://www.nodeseek.com/"
 ], { stdio: "inherit" });
+
+if (process.platform === "darwin") {
+  const hideTestChrome = () => {
+    const hideProcess = spawn("/usr/bin/osascript", [
+      "-e",
+      'tell application "System Events" to tell process "Google Chrome for Testing" to set visible to false'
+    ], { stdio: "ignore" });
+    hideProcess.on("error", () => {});
+  };
+  setTimeout(hideTestChrome, 1500).unref();
+}
+
 child.on("error", (error) => {
   console.error(error.message);
   process.exitCode = 1;

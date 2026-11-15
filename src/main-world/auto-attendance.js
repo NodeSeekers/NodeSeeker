@@ -109,6 +109,10 @@
       return fetchTelegramActivityCommentContents(detail.comments);
     }
 
+    if (detail.operation === "fetch-system-post-content") {
+      return fetchTelegramSystemPostContent(detail);
+    }
+
     throw new Error("未知的 NodeSeek 页面请求");
   }
 
@@ -131,26 +135,18 @@
     const contents = [];
     for (const pageComments of pageGroups.values()) {
       const { postId, pageNumber } = pageComments[0];
-      let parsedDocument;
-      try {
-        const response = await fetch(`/post-${postId}-${pageNumber}`, {
-          credentials: "include",
-          cache: "no-store"
-        });
-        if (!response.ok) continue;
-        parsedDocument = new DOMParser().parseFromString(await response.text(), "text/html");
-      } catch (_error) {
-        continue;
-      }
+      const response = await fetch(`/post-${postId}-${pageNumber}`, {
+        credentials: "include",
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(`读取帖子 ${postId} 第 ${pageNumber} 页失败（HTTP ${response.status}）`);
+      const parsedDocument = new DOMParser().parseFromString(await response.text(), "text/html");
 
       const commentItems = [...parsedDocument.querySelectorAll("li.content-item[data-comment-id]")];
       for (const comment of pageComments) {
         const item = commentItems.find((node) => node.getAttribute("data-comment-id") === comment.commentId);
         const article = item?.querySelector("article.post-content");
-        if (!article) {
-          contents.push({ commentId: comment.commentId, quote: "", reply: "" });
-          continue;
-        }
+        if (!article) throw new Error(`帖子 ${postId} 未找到通知楼层 ${comment.commentId}`);
 
         const quoteBlocks = [...article.querySelectorAll("blockquote")]
           .filter((node) => !node.parentElement?.closest("blockquote"));
@@ -172,6 +168,32 @@
       .replace(/\u00a0/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  async function fetchTelegramSystemPostContent(value) {
+    const postId = String(value?.postId || "").trim();
+    const pageNumber = Number(value?.pageNumber);
+    if (!/^\d{1,20}$/.test(postId) || Number(postId) <= 0
+        || !Number.isSafeInteger(pageNumber) || pageNumber < 1) {
+      throw new Error("NodeSeek 帖子编号无效");
+    }
+
+    const response = await fetch(`/post-${postId}-${pageNumber}`, {
+      credentials: "include",
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error(`NodeSeek 帖子页返回 HTTP ${response.status}`);
+    const parsedDocument = new DOMParser().parseFromString(await response.text(), "text/html");
+    const title = normalizeTelegramActivityCommentText(
+      parsedDocument.querySelector(".post-title-link")?.textContent
+        || parsedDocument.querySelector(".post-title h1")?.textContent || ""
+    );
+    const bodyElement = parsedDocument.querySelector('.content-item[id="0"] article.post-content');
+    if (!title || !bodyElement) throw new Error("NodeSeek 帖子标题或正文缺失");
+    const body = normalizeTelegramActivityCommentText(
+      bodyElement.textContent || ""
+    );
+    return { title, body };
   }
 
   function getAutoAttendanceDateKey(timestamp) {
