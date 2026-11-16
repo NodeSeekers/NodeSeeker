@@ -503,6 +503,235 @@ test("long polling advances its offset across full batches before a new /start u
   expect(replies).toHaveLength(1);
 });
 
+test("failed Topic replies retry the same Telegram update with persisted backoff", async () => {
+  const stored = { telegramBotToken: "123456:secret" };
+  const requestOffsets = [];
+  const scheduledDelays = [];
+  let shouldRun = true;
+  let processAttempts = 0;
+  const sandbox = createSandbox(async (url) => {
+    requestOffsets.push(new URL(url).searchParams.get("offset"));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: [{ update_id: 50, message: { text: "reply" } }] })
+    };
+  });
+  sandbox.setTimeout = (callback, delay = 0) => {
+    scheduledDelays.push(Number(delay) || 0);
+    if (Number(delay) <= 1000) queueMicrotask(callback);
+    return scheduledDelays.length;
+  };
+  sandbox.clearTimeout = () => {};
+  sandbox.isTelegramUpdateLongPollNeeded = () => {
+    const active = shouldRun;
+    shouldRun = false;
+    return active;
+  };
+  sandbox.cacheTelegramDirectTopicUpdates = async () => {};
+  sandbox.processTelegramPersonalStartUpdateIfWatching = async () => {};
+  sandbox.processTelegramManagedTopicUpdates = async () => {
+    processAttempts += 1;
+    if (processAttempts === 1) throw new Error("NodeSeek 暂时不可用");
+  };
+  sandbox.chrome = { storage: { local: {
+    get: async (query) => typeof query === "string"
+      ? { [query]: stored[query] }
+      : { ...query, ...stored },
+    set: async (values) => Object.assign(stored, values),
+    remove: async (keys) => {
+      for (const key of [].concat(keys)) delete stored[key];
+    }
+  } } };
+
+  await vm.runInContext("runTelegramUpdatesLongPoll()", sandbox);
+  expect(stored.telegramPersonalStartOffset || 0).toBe(0);
+  expect(stored.telegramUpdatesRetryState.failureCount).toBe(1);
+  expect(stored.telegramUpdatesRetryState.nextRetryAt).toBeGreaterThan(Date.now());
+
+  // A restarted service worker must honor the persisted backoff and retry the unacknowledged update.
+  sandbox.telegramUpdatesFailureCount = 0;
+  shouldRun = true;
+  await vm.runInContext("runTelegramUpdatesLongPoll()", sandbox);
+
+  expect(requestOffsets).toEqual([null, null]);
+  expect(processAttempts).toBe(2);
+  expect(stored.telegramPersonalStartOffset).toBe(51);
+  expect(stored.telegramUpdatesRetryState).toEqual({ failureCount: 0, nextRetryAt: 0 });
+  expect(scheduledDelays.some((delay) => delay >= 900 && delay <= 1000)).toBe(true);
+});
+
+test("a failing personal /start registration is queued without blocking Telegram update offset", async () => {
+  const stored = {
+    telegramPersonalStartOffset: 0,
+    telegramPersonalStartWatchUntil: Date.now() + 60_000,
+    telegramPersonalStartWatchSince: 0,
+    telegramPendingPersonalStartUpdates: []
+  };
+  const fetched = [];
+  let registrationAttempts = 0;
+  const sandbox = createSandbox(async () => ({
+    ok: true,
+    json: async () => ({ ok: true, result: fetched.shift() || [] })
+  }));
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values),
+    remove: async (keys) => { for (const key of [].concat(keys)) delete stored[key]; }
+  } } };
+  sandbox.cacheTelegramDirectTopicUpdates = async () => {};
+  sandbox.processTelegramManagedTopicUpdates = async () => {};
+  sandbox.registerTelegramPersonalStartUpdate = async () => {
+    registrationAttempts += 1;
+    if (registrationAttempts === 1) throw new Error("存储暂不可用");
+  };
+  fetched.push([{
+    update_id: 50,
+    message: { chat: { id: 333, type: "private" }, from: { id: 333 }, text: "/start" }
+  }]);
+
+  await vm.runInContext('getTelegramUpdatesAndProcess("123456:secret")', sandbox);
+  expect(stored.telegramPersonalStartOffset).toBe(51);
+  expect(stored.telegramPendingPersonalStartUpdates).toEqual([expect.objectContaining({
+    updateId: 50,
+    attempts: 1
+  })]);
+
+  stored.telegramPendingPersonalStartUpdates[0].nextRetryAt = 0;
+  await vm.runInContext('getTelegramUpdatesAndProcess("123456:secret")', sandbox);
+  expect(registrationAttempts).toBe(2);
+  expect(stored.telegramPendingPersonalStartUpdates).toEqual([]);
+});
+
+test("one failed Telegram Topic reply does not block another topic and remains queued", async () => {
+  const stored = {
+    telegramManagedTopics: [
+      { kind: "dm", chatId: "333", topicId: "93523", nsUserId: "63050", name: "first" },
+      { kind: "dm", chatId: "333", topicId: "93524", nsUserId: "63051", name: "second" }
+    ],
+    telegramProcessedTopicUpdateIds: [],
+    telegramPendingTopicUpdates: [],
+    telegramOutgoingMessageEchoes: []
+  };
+  const sent = [];
+  let failFirstPeer = true;
+  const sandbox = createSandbox();
+  sandbox.chrome = { storage: { local: {
+    get: async (query) => typeof query === "string"
+      ? { [query]: stored[query] }
+      : { ...query, ...stored },
+    set: async (values) => Object.assign(stored, values),
+    remove: async () => {}
+  } } };
+  sandbox.findNodeSeekOutgoingMessageForTelegramEcho = async () => null;
+  sandbox.getNodeSeekTelegramSendBaselineMessageId = async () => "0";
+  sandbox.sendNodeSeekPrivateMessage = async (userId, content) => {
+    if (userId === "63050" && failFirstPeer) {
+      failFirstPeer = false;
+      throw new Error("NodeSeek 暂时不可用");
+    }
+    sent.push({ userId, content });
+  };
+  sandbox.scheduleTelegramMonitorAlarm = async () => {};
+  sandbox.markNodeSeekConversationRead = async () => {};
+
+  const updates = [
+    { update_id: 100, message: { chat: { type: "private", id: "333" }, message_thread_id: 93523, from: { id: 1 }, text: "first reply" } },
+    { update_id: 101, message: { chat: { type: "private", id: "333" }, message_thread_id: 93524, from: { id: 1 }, text: "second reply" } }
+  ];
+  await vm.runInContext(`processTelegramManagedTopicUpdates("123456:secret", ${JSON.stringify(updates)})`, sandbox);
+
+  expect(sent).toEqual([{ userId: "63051", content: "second reply" }]);
+  expect(stored.telegramPendingTopicUpdates).toEqual([expect.objectContaining({
+    updateIds: ["100"],
+    attempts: 1,
+    lastError: "NodeSeek 暂时不可用"
+  })]);
+  expect(stored.telegramProcessedTopicUpdateIds).toContain("101");
+  expect(stored.telegramProcessedTopicUpdateIds).not.toContain("100");
+
+  stored.telegramPendingTopicUpdates[0].nextRetryAt = 0;
+  await vm.runInContext('processTelegramManagedTopicUpdates("123456:secret", [])', sandbox);
+  expect(sent).toEqual([
+    { userId: "63051", content: "second reply" },
+    { userId: "63050", content: "first reply" }
+  ]);
+  expect(stored.telegramPendingTopicUpdates).toHaveLength(0);
+  expect(stored.telegramProcessedTopicUpdateIds).toContain("100");
+});
+
+test("a stalled HTTP request is aborted and reported as a retryable timeout", async () => {
+  const sandbox = createSandbox((_url, options = {}) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  }));
+
+  const result = await vm.runInContext(
+    'fetchWithTimeout("https://example.invalid/slow", {}, 5).then(() => null).catch((error) => ({ code: error.code, message: error.message }))',
+    sandbox
+  );
+
+  expect(result).toEqual({ code: "REQUEST_TIMEOUT", message: "网络请求超时（1 秒）" });
+
+  const bodySandbox = createSandbox(async (_url, options = {}) => ({
+    json: () => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("body aborted")), { once: true });
+    })
+  }));
+  const bodyResult = await vm.runInContext(
+    '(async () => { try { const response = await fetchWithTimeout("https://example.invalid/body", {}, 5); await response.json(); return null; } catch (error) { return { code: error.code, message: error.message }; } })()',
+    bodySandbox
+  );
+
+  expect(bodyResult).toEqual({ code: "REQUEST_TIMEOUT", message: "网络请求超时（1 秒）" });
+});
+
+test("Telegram delivery receipts prevent already completed targets from receiving a retry duplicate", async () => {
+  const stored = { telegramDeliveryReceipts: {} };
+  let sends = 0;
+  const sandbox = createSandbox();
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.sendTelegramMessage = async () => { sends += 1; };
+
+  await vm.runInContext(`sendTelegramToTargets({
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }]
+  }, "same event", "ns-dm:1:2")`, sandbox);
+  await vm.runInContext(`sendTelegramToTargets({
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }]
+  }, "same event", "ns-dm:1:2")`, sandbox);
+
+  expect(sends).toBe(1);
+  expect(Object.keys(stored.telegramDeliveryReceipts)).toHaveLength(1);
+});
+
+test("NodeSeek read-state failures remain queued and retry without blocking message processing", async () => {
+  const stored = { telegramPendingTopicReadUserIds: ["63050"], telegramRetryStates: {} };
+  let attempts = 0;
+  const sandbox = createSandbox();
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.markNodeSeekConversationRead = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("NodeSeek 暂时不可用");
+  };
+
+  await vm.runInContext("processPendingTelegramTopicReads()", sandbox);
+  expect(stored.telegramPendingTopicReadUserIds).toEqual(["63050"]);
+  expect(stored.telegramRetryStates["nodeseek-mark-read:63050"].failureCount).toBe(1);
+
+  stored.telegramRetryStates["nodeseek-mark-read:63050"].nextRetryAt = 0;
+  await vm.runInContext("processPendingTelegramTopicReads()", sandbox);
+  expect(attempts).toBe(2);
+  expect(stored.telegramPendingTopicReadUserIds).toEqual([]);
+  expect(stored.telegramRetryStates["nodeseek-mark-read:63050"]).toBeUndefined();
+});
+
 test("personal /start queue scanning preserves Direct topic metadata without message text", async () => {
   const stored = {};
   const sandbox = createSandbox();
@@ -785,6 +1014,116 @@ test("Telegram-originated private reply is not mirrored back to its Telegram top
   expect(telegramSends).toHaveLength(0);
   expect(stored.telegramOutgoingMessageEchoes).toHaveLength(0);
   expect(stored.telegramMessageCursors["222:777"]).toBe("2");
+});
+
+test("a stale sending echo does not block newer private messages in the conversation", async () => {
+  const staleContent = "较早的 Telegram 回信";
+  const laterContent = "后续 Telegram 回信";
+  const stored = {
+    telegramManagedTopics: [{
+      id: "dm-1", kind: "dm", chatId: "333", topicId: "93523", nsUserId: "63050", name: "szhhaoo",
+      iconCustomEmojiId: "topic-icon"
+    }],
+    telegramSystemNotificationUserId: "",
+    telegramMessageCursors: { "63050:72248": "9191364" },
+    telegramOutgoingMessageEchoes: []
+  };
+  const telegramSends = [];
+  const sandbox = createSandbox(async (url, options = {}) => {
+    if (url === "https://www.nodeseek.com/api/notification/message/list") {
+      return { ok: true, json: async () => ({ success: true, msgArray: [{
+        sender_id: "63050", receiver_id: "72248", sender_name: "szhhaoo", max_id: 9191618
+      }] }) };
+    }
+    if (url === "https://www.nodeseek.com/api/notification/message/with/63050") {
+      return { ok: true, json: async () => ({ success: true, msgArray: [
+        {
+          id: 9191484, sender_id: "72248", receiver_id: "63050", content: staleContent, viewed: 1
+        },
+        {
+          id: 9191485, sender_id: "72248", receiver_id: "63050", content: laterContent, viewed: 1
+        },
+        {
+          id: 9191618, sender_id: "63050", receiver_id: "72248", content: "我就用用ai，问题不大的，好的，谢了"
+        }
+      ] }) };
+    }
+    if (url.endsWith("/sendMessage")) {
+      telegramSends.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "72248" });
+  stored.telegramOutgoingMessageEchoes.push(
+    {
+      userId: "63050",
+      fingerprint: await vm.runInContext(
+        `getTelegramOutgoingEchoFingerprint("63050", ${JSON.stringify(staleContent)})`, sandbox
+      ),
+      originChatId: "333",
+      originTopicId: "93523",
+      originTopicName: "szhhaoo",
+      baselineMessageId: "9191340",
+      status: "sending",
+      createdAt: Date.now() - 60_000
+    },
+    {
+      userId: "63050",
+      fingerprint: await vm.runInContext(
+        `getTelegramOutgoingEchoFingerprint("63050", ${JSON.stringify(laterContent)})`, sandbox
+      ),
+      originChatId: "333",
+      originTopicId: "93523",
+      originTopicName: "szhhaoo",
+      baselineMessageId: "9191364",
+      status: "sent",
+      createdAt: Date.now() - 30_000
+    }
+  );
+
+  await vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify({
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageCursors: stored.telegramMessageCursors,
+    telegramManagedTopics: stored.telegramManagedTopics
+  })})`, sandbox);
+
+  expect(telegramSends).toEqual([expect.objectContaining({
+    chat_id: "333", message_thread_id: 93523, text: "我就用用ai，问题不大的，好的，谢了"
+  })]);
+  expect(stored.telegramMessageCursors["63050:72248"]).toBe("9191618");
+  expect(stored.telegramOutgoingMessageEchoes).toHaveLength(0);
+});
+
+test("a recent sending echo remains pending during its delivery grace period", async () => {
+  const content = "刚发送的 Telegram 回信";
+  const stored = { telegramOutgoingMessageEchoes: [] };
+  const sandbox = createSandbox();
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  stored.telegramOutgoingMessageEchoes.push({
+    userId: "63050",
+    fingerprint: await vm.runInContext(
+      `getTelegramOutgoingEchoFingerprint("63050", ${JSON.stringify(content)})`, sandbox
+    ),
+    baselineMessageId: "9191364",
+    status: "sending",
+    createdAt: Date.now()
+  });
+
+  const result = await vm.runInContext(
+    `consumeTelegramOutgoingEcho("63050", ${JSON.stringify(content)}, "9191484")`, sandbox
+  );
+
+  expect(result).toEqual({ pending: true });
+  expect(stored.telegramOutgoingMessageEchoes).toHaveLength(1);
 });
 
 test("outgoing system notification reuses its system topic instead of creating a DM topic", async () => {
@@ -1230,7 +1569,7 @@ test("Telegram photo upload uses the Telegram image MIME when the file endpoint 
   expect(uploads[0].type).toBe("image/jpeg");
 });
 
-test("Telegram tells the topic user to enable image hosting when it is disabled", async () => {
+test("Telegram tells the topic user to enable image hosting and keeps the update for retry", async () => {
   const stored = {
     telegramManagedTopics: [{ kind: "dm", chatId: "-1001", topicId: "456", nsUserId: "222", name: "Alice" }],
     telegramProcessedTopicUpdateIds: [],
@@ -1272,7 +1611,12 @@ test("Telegram tells the topic user to enable image hosting when it is disabled"
   expect(telegramMessages[0].message_thread_id).toBe(456);
   expect(telegramMessages[0].text).toContain("图床配置");
   expect(telegramMessages[0].text).toContain("开启图床上传");
-  expect(stored.telegramProcessedTopicUpdateIds).toContain("789");
+  expect(stored.telegramProcessedTopicUpdateIds || []).not.toContain("789");
+  expect(stored.telegramPendingTopicUpdates).toEqual([expect.objectContaining({
+    updateIds: ["789"],
+    attempts: 1,
+    failureNotified: true
+  })]);
 });
 
 test("Telegram photo caption and uploaded image Markdown are sent as one NodeSeek message", async () => {
@@ -1300,6 +1644,8 @@ test("Telegram photo caption and uploaded image Markdown are sent as one NodeSee
   sandbox.Blob = Blob;
   sandbox.getOptions = async () => ({ imageUploadEnabled: true });
   sandbox.uploadImage = async () => ({ markdown: "![image](https://cdn.nodeimage.com/test.jpg)" });
+  sandbox.getNodeSeekTelegramSendBaselineMessageId = async () => "0";
+  sandbox.findNodeSeekOutgoingMessageForTelegramEcho = async () => null;
   sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "999" });
   sandbox.chrome = {
     storage: { local: {

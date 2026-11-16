@@ -461,11 +461,23 @@ function getLuckyDrawInfo(notification) {
 }
 
 async function fetchLuckyCurrentUser(luckyUrl) {
-  const response = await fetch(luckyUrl, {
-    credentials: "include",
-    cache: "no-store"
-  });
-  const html = await response.text();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort("timeout"), 15_000);
+  let response;
+  let html;
+  try {
+    response = await fetch(luckyUrl, {
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal
+    });
+    html = await response.text();
+  } catch (error) {
+    if (controller.signal.reason === "timeout") throw new Error("获取 NodeSeek 当前账号超时（15 秒）");
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     throw new Error(`获取抽奖页面失败：HTTP ${response.status}`);
   }

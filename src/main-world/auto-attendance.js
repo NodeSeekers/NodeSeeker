@@ -3,6 +3,7 @@
   const RESULT_EVENT = "nodeseek-helper:attendance-result";
   const TELEGRAM_REQUEST_EVENT = "nodeseek-helper:telegram-page-request";
   const TELEGRAM_RESULT_EVENT = "nodeseek-helper:telegram-page-result";
+  const TELEGRAM_PAGE_REQUEST_TIMEOUT_MS = 15_000;
 
   window.addEventListener(REQUEST_EVENT, (event) => {
     const detail = event.detail || {};
@@ -54,7 +55,7 @@
       if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) {
         throw new Error("NodeSeek 用户 ID 无效");
       }
-      const response = await fetch("/api/notification/message/send", {
+      const response = await fetchWithTimeout("/api/notification/message/send", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -77,7 +78,7 @@
       if (!/^\d+$/.test(userId) || !/^\d+$/.test(currentUserId)) {
         throw new Error("NodeSeek 私信用户 ID 无效，无法标记已读");
       }
-      const conversationResponse = await fetch(
+      const conversationResponse = await fetchWithTimeout(
         `/api/notification/message/with/${encodeURIComponent(userId)}`,
         { credentials: "include", headers: { Accept: "application/json" }, cache: "no-store" }
       );
@@ -92,7 +93,7 @@
         .filter((id) => id != null);
       if (unreadIds.length === 0) return { marked: 0 };
 
-      const readResponse = await fetch("/api/notification/message/markViewed", {
+      const readResponse = await fetchWithTimeout("/api/notification/message/markViewed", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -135,7 +136,7 @@
     const contents = [];
     for (const pageComments of pageGroups.values()) {
       const { postId, pageNumber } = pageComments[0];
-      const response = await fetch(`/post-${postId}-${pageNumber}`, {
+      const response = await fetchWithTimeout(`/post-${postId}-${pageNumber}`, {
         credentials: "include",
         cache: "no-store"
       });
@@ -178,7 +179,7 @@
       throw new Error("NodeSeek 帖子编号无效");
     }
 
-    const response = await fetch(`/post-${postId}-${pageNumber}`, {
+    const response = await fetchWithTimeout(`/post-${postId}-${pageNumber}`, {
       credentials: "include",
       cache: "no-store"
     });
@@ -217,5 +218,44 @@
     window.dispatchEvent(new CustomEvent(TELEGRAM_RESULT_EVENT, {
       detail: { requestId, ...result }
     }));
+  }
+
+  async function fetchWithTimeout(input, options = {}, timeoutMs = TELEGRAM_PAGE_REQUEST_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const externalSignal = options?.signal;
+    const abortFromExternalSignal = () => controller.abort(externalSignal.reason);
+    if (externalSignal?.aborted) abortFromExternalSignal();
+    else externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
+    let timeoutId = window.setTimeout(() => {
+      controller.abort("timeout");
+      externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+    }, timeoutMs);
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      timeoutId = 0;
+      externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+    };
+    try {
+      const response = await fetch(input, { ...options, signal: controller.signal });
+      for (const method of ["json", "text", "blob", "arrayBuffer", "formData"]) {
+        if (typeof response?.[method] !== "function") continue;
+        const readBody = response[method].bind(response);
+        response[method] = async (...args) => {
+          try {
+            return await readBody(...args);
+          } catch (error) {
+            if (controller.signal.reason === "timeout") throw new Error("NodeSeek 请求超时（15 秒）");
+            throw error;
+          } finally {
+            cleanup();
+          }
+        };
+      }
+      return response;
+    } catch (error) {
+      cleanup();
+      if (controller.signal.reason === "timeout") throw new Error("NodeSeek 请求超时（15 秒）");
+      throw error;
+    }
   }
 })();

@@ -95,6 +95,16 @@ test("extension loads, saves settings, and communicates with its background", as
     await expect(page.locator("#telegramProtectedSettings")).toBeHidden();
     await expect(page.locator(".telegram-token-section a")).toHaveAttribute("href", "https://t.me/BotFather");
     await page.locator("#telegramBotToken").fill("test-token");
+    await expect(page.locator("#telegramProtectedSettings")).toBeHidden();
+    await page.locator("#telegramBotToken").fill("123456:abcdefghijklmnopqrstuvwxyz123456789");
+    await page.evaluate(async () => {
+      clearTimeout(telegramTokenValidationTimer);
+      telegramTokenValidationRequestId += 1;
+      telegramValidatedToken = document.querySelector("#telegramBotToken").value.trim();
+      telegramTokenValidationState = "valid";
+      syncTelegramSetupVisibility();
+      await saveTelegramConfig({ silent: true });
+    });
     await expect(page.locator("#telegramProtectedSettings")).toBeVisible();
     await expect(page.locator("#openTelegramBot")).toHaveText("Start");
     await page.locator("#telegramTargetType").selectOption("direct");
@@ -161,7 +171,7 @@ test("extension loads, saves settings, and communicates with its background", as
       const state = await chrome.storage.local.get(["telegramTargets", "telegramBotToken", "telegramKeywordRules", "telegramBoardSlugs"]);
       return [state.telegramTargets?.map((target) => [target.type, target.name]), state.telegramBotToken,
         state.telegramKeywordRules?.[0]?.mode, state.telegramBoardSlugs?.[0], state.telegramKeywordRules?.[0]?.excludeTerms];
-    })).toEqual([[ ["direct", "test direct"], ["personal", "test personal"] ], "test-token", "all", "daily", ["已出", "求购"]]);
+    })).toEqual([[ ["direct", "test direct"], ["personal", "test personal"] ], "123456:abcdefghijklmnopqrstuvwxyz123456789", "all", "daily", ["已出", "求购"]]);
     await page.reload();
     await page.waitForFunction(() => {
       return document.querySelector("#followKeywordGroups")?.children.length > 0;

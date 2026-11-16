@@ -14,7 +14,12 @@ const TELEGRAM_KEYS = {
   topicReadMarkerIconId: "telegramTopicUnreadDistortedFaceIconCustomEmojiId",
   systemNotificationUserId: "telegramSystemNotificationUserId",
   managedTopics: "telegramManagedTopics",
+  deliveryReceipts: "telegramDeliveryReceipts",
   processedTopicUpdates: "telegramProcessedTopicUpdateIds",
+  pendingTopicUpdates: "telegramPendingTopicUpdates",
+  pendingStartUpdates: "telegramPendingPersonalStartUpdates",
+  retryStates: "telegramRetryStates",
+  updatesRetryState: "telegramUpdatesRetryState",
   pendingTopicImageMarkdowns: "telegramPendingTopicImageMarkdowns",
   pendingTopicReadUserIds: "telegramPendingTopicReadUserIds",
   mentionReplyCursors: "telegramMentionReplyCursors",
@@ -33,6 +38,7 @@ const TELEGRAM_ACTIVITY_PAGE_LIMIT = 20;
 const TELEGRAM_ACTIVITY_PAGE_SIZE = 10;
 const TELEGRAM_OUTGOING_ECHO_LIMIT = 200;
 const TELEGRAM_OUTGOING_ECHO_TTL_MS = 2 * 60 * 60 * 1000;
+const TELEGRAM_OUTGOING_ECHO_PENDING_TIMEOUT_MS = 30 * 1000;
 const TELEGRAM_TOPIC_UNREAD_MARKER_TYPE = "topic-icon-eyes";
 const TELEGRAM_TOPIC_STYLES = Object.freeze({
   system: Object.freeze({ name: "系统", iconCustomEmojiId: "5309984423003823246", iconColor: 16766590 }),
@@ -124,6 +130,8 @@ const TELEGRAM_DIRECT_TOPIC_SCAN_UNTIL_KEY = "telegramDirectTopicScanUntil";
 const TELEGRAM_DIRECT_TOPIC_SCAN_DURATION_MS = 5 * 60 * 1000;
 const TELEGRAM_UPDATES_LONG_POLL_TIMEOUT_SECONDS = 20;
 const TELEGRAM_UPDATES_RETRY_MAX_MS = 30 * 1000;
+const TELEGRAM_REQUEST_TIMEOUT_MS = 15 * 1000;
+const TELEGRAM_FILE_REQUEST_TIMEOUT_MS = 30 * 1000;
 const TELEGRAM_ACTIVITY_ENDPOINTS = Object.freeze({
   at: "/api/notification/at-me/list",
   reply: "/api/notification/reply-to-me/list"
@@ -162,7 +170,7 @@ const TELEGRAM_BOARD_NAMES = {
 
 async function getTelegramUpdateConflictMessage(token) {
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+    const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/getWebhookInfo`);
     const result = await response.json();
     if (response.ok && result?.ok && result.result?.url) {
       return "该机器人已配置 Webhook。插件可以发送通知，但无法通过 getUpdates 接收 Topic 回信或自动读取 /start、频道 Direct 会话。";
@@ -171,6 +179,60 @@ async function getTelegramUpdateConflictMessage(token) {
     // Keep the fallback message useful if Telegram cannot return webhook status.
   }
   return "另一个实例正在使用 getUpdates。插件仍可发送通知，但自动读取 /start、频道 Direct 会话和转发 Topic 回信会受影响。";
+}
+
+async function fetchWithTimeout(input, options = {}, timeoutMs = TELEGRAM_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const externalSignal = options?.signal;
+  const abortFromExternalSignal = () => controller.abort(externalSignal.reason);
+  if (externalSignal?.aborted) abortFromExternalSignal();
+  else externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
+  let timeoutId = setTimeout(() => {
+    controller.abort("timeout");
+    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+  }, timeoutMs);
+  const cleanup = () => {
+    clearTimeout(timeoutId);
+    timeoutId = 0;
+    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+  };
+  const toTimeoutError = () => {
+    const error = new Error(`网络请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`);
+    error.code = "REQUEST_TIMEOUT";
+    return error;
+  };
+  try {
+    const response = await fetch(input, { ...options, signal: controller.signal });
+    for (const method of ["json", "text", "blob", "arrayBuffer", "formData"]) {
+      if (typeof response?.[method] !== "function") continue;
+      const readBody = response[method].bind(response);
+      response[method] = async (...args) => {
+        try {
+          return await readBody(...args);
+        } catch (error) {
+          if (controller.signal.reason === "timeout") throw toTimeoutError();
+          throw error;
+        } finally {
+          cleanup();
+        }
+      };
+    }
+    return response;
+  } catch (error) {
+    cleanup();
+    if (controller.signal.reason === "timeout") throw toTimeoutError();
+    throw error;
+  }
+}
+
+function promiseWithTimeout(promise, timeoutMs, label = "操作") {
+  let timeoutId;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`${label}超时（${Math.ceil(timeoutMs / 1000)} 秒）`)), timeoutMs);
+    })
+  ]).finally(() => clearTimeout(timeoutId));
 }
 
 async function scheduleTelegramMonitorAlarm(
@@ -421,6 +483,11 @@ async function runTelegramUpdatesLongPoll() {
       });
       if (!isTelegramUpdateLongPollNeeded(config)) break;
 
+      const retryState = await chrome.storage.local.get({ [TELEGRAM_KEYS.updatesRetryState]: null });
+      const retryDelayMs = Math.max(0,
+        Number(retryState[TELEGRAM_KEYS.updatesRetryState]?.nextRetryAt) - Date.now());
+      if (retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+
       const token = String(config[TELEGRAM_KEYS.token] || "").trim();
       const controller = new AbortController();
       telegramUpdatesAbortController = controller;
@@ -434,12 +501,24 @@ async function runTelegramUpdatesLongPoll() {
           controller.signal
         );
         telegramUpdatesFailureCount = 0;
+        await chrome.storage.local.set({
+          [TELEGRAM_KEYS.updatesRetryState]: { failureCount: 0, nextRetryAt: 0 }
+        });
       } catch (error) {
         if (controller.signal.aborted && controller.signal.reason !== "timeout") continue;
-        telegramUpdatesFailureCount += 1;
-        const delayMs = Number(error?.retryAfterSeconds) > 0
-          ? Math.max(1000, Number(error.retryAfterSeconds) * 1000)
-          : Math.min(1000 * (2 ** Math.min(telegramUpdatesFailureCount - 1, 5)), TELEGRAM_UPDATES_RETRY_MAX_MS);
+        const storedRetryState = await chrome.storage.local.get({ [TELEGRAM_KEYS.updatesRetryState]: null });
+        const previousFailureCount = Number(storedRetryState[TELEGRAM_KEYS.updatesRetryState]?.failureCount) || 0;
+        telegramUpdatesFailureCount = Math.max(telegramUpdatesFailureCount, previousFailureCount) + 1;
+        const delayMs = getTelegramUpdatesRetryDelayMs(
+          telegramUpdatesFailureCount,
+          error?.retryAfterSeconds
+        );
+        await chrome.storage.local.set({
+          [TELEGRAM_KEYS.updatesRetryState]: {
+            failureCount: telegramUpdatesFailureCount,
+            nextRetryAt: Date.now() + delayMs
+          }
+        });
         await chrome.storage.local.set({ [TELEGRAM_KEYS.lastError]: `Telegram 长轮询：${error?.message || "连接失败"}` });
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       } finally {
@@ -451,6 +530,63 @@ async function runTelegramUpdatesLongPoll() {
     telegramUpdatesAbortController = null;
     telegramUpdatesActiveToken = "";
     telegramUpdatesLongPollRunning = false;
+  }
+}
+
+function getTelegramUpdatesRetryDelayMs(failureCountValue, retryAfterSecondsValue = 0) {
+  const retryAfterSeconds = Number(retryAfterSecondsValue) || 0;
+  if (retryAfterSeconds > 0) return Math.max(1000, retryAfterSeconds * 1000);
+  const failureCount = Math.max(1, Math.floor(Number(failureCountValue) || 1));
+  return Math.min(1000 * (2 ** Math.min(failureCount - 1, 5)), TELEGRAM_UPDATES_RETRY_MAX_MS);
+}
+
+async function isTelegramRetryDue(keyValue) {
+  const key = String(keyValue || "").trim();
+  if (!key) return true;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.retryStates]: {} });
+  const state = stored[TELEGRAM_KEYS.retryStates]?.[key];
+  return (Number(state?.nextRetryAt) || 0) <= Date.now();
+}
+
+async function recordTelegramRetryFailure(keyValue, error) {
+  const key = String(keyValue || "").trim();
+  if (!key) return 0;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.retryStates]: {} });
+  const states = { ...(stored[TELEGRAM_KEYS.retryStates] || {}) };
+  const previous = states[key] || {};
+  const failureCount = (Number(previous.failureCount) || 0) + 1;
+  const retryAfterSeconds = Number(error?.retryAfterSeconds) || 0;
+  const delayMs = retryAfterSeconds > 0
+    ? Math.max(1000, retryAfterSeconds * 1000)
+    : Math.min(10_000 * (2 ** Math.min(failureCount - 1, 5)), 5 * 60 * 1000);
+  states[key] = {
+    failureCount,
+    nextRetryAt: Date.now() + delayMs,
+    lastError: String(error?.message || error || "请求失败").slice(0, 300)
+  };
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.retryStates]: states });
+  return delayMs;
+}
+
+async function clearTelegramRetryState(keyValue) {
+  const key = String(keyValue || "").trim();
+  if (!key) return;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.retryStates]: {} });
+  const states = { ...(stored[TELEGRAM_KEYS.retryStates] || {}) };
+  if (!Object.hasOwn(states, key)) return;
+  delete states[key];
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.retryStates]: states });
+}
+
+async function runTelegramRetriableOperation(key, operation) {
+  if (!await isTelegramRetryDue(key)) return false;
+  try {
+    await operation();
+    await clearTelegramRetryState(key);
+    return true;
+  } catch (error) {
+    await recordTelegramRetryFailure(key, error);
+    throw error;
   }
 }
 
@@ -527,7 +663,8 @@ async function checkTelegramNotifications() {
     ]) {
       if (enabled) {
         try {
-          await checkForNewNodeSeekActivity(config, kind);
+          await runTelegramRetriableOperation(`nodeseek-activity:${kind}`, () =>
+            checkForNewNodeSeekActivity(config, kind));
         } catch (error) {
           errors.push(`${kind === "at" ? "提及" : "回复"}：${error?.message || "检查失败"}`);
         }
@@ -562,7 +699,7 @@ async function checkTelegramRssNotifications() {
 
     let errorMessage = "";
     try {
-      await checkRssPosts(config);
+      await runTelegramRetriableOperation("nodeseek-rss", () => checkRssPosts(config));
     } catch (error) {
       errorMessage = `RSS：${error?.message || "检查失败"}`;
     }
@@ -579,14 +716,22 @@ async function checkForNewNodeSeekMessages(config, {
   allowUnmatchedOutgoing = true,
   allowIncoming = true
 } = {}) {
-  const response = await fetch("https://www.nodeseek.com/api/notification/message/list", {
-    credentials: "include",
-    headers: { Accept: "application/json" }
-  });
-  if (!response.ok) throw new Error(`NodeSeek 私信接口返回 HTTP ${response.status}`);
-  const data = await response.json();
-  if (data?.success !== true || !Array.isArray(data.msgArray)) {
-    throw new Error("NodeSeek 私信接口响应格式异常");
+  if (!await isTelegramRetryDue("nodeseek-dm-list")) return;
+  let data;
+  try {
+    const response = await fetchWithTimeout("https://www.nodeseek.com/api/notification/message/list", {
+      credentials: "include",
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) throw new Error(`NodeSeek 私信接口返回 HTTP ${response.status}`);
+    data = await response.json();
+    if (data?.success !== true || !Array.isArray(data.msgArray)) {
+      throw new Error("NodeSeek 私信接口响应格式异常");
+    }
+    await clearTelegramRetryState("nodeseek-dm-list");
+  } catch (error) {
+    await recordTelegramRetryFailure("nodeseek-dm-list", error);
+    throw error;
   }
 
   const systemNotificationMessage = data.msgArray.find((message) => {
@@ -641,8 +786,12 @@ async function checkForNewNodeSeekMessages(config, {
   }
 
   let changed = false;
+  const conversationErrors = [];
   for (const message of changedMessages) {
     const conversationId = getConversationId(message);
+    const retryKey = `nodeseek-dm:${conversationId}`;
+    if (!await isTelegramRetryDue(retryKey)) continue;
+    try {
     const previousMessageId = String(nextCursors[conversationId] || "0");
     const latestMessageId = String(message.max_id);
 
@@ -723,7 +872,10 @@ async function checkForNewNodeSeekMessages(config, {
           fallbackText,
           isSystemNotification ? "system" : "dm",
           messageContent.imageUrls,
-          { includeDirectTargets: !isOutgoing }
+          {
+            includeDirectTargets: !isOutgoing,
+            deliveryKey: `ns-dm:${conversationId}:${String(incomingMessage.id)}`
+          }
         );
         if (isOutgoing && !isSystemNotification) {
           for (const topic of deliveredTopics) {
@@ -741,13 +893,24 @@ async function checkForNewNodeSeekMessages(config, {
       await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
     }
 
-    if (waitingForTelegramSend) continue;
+    if (waitingForTelegramSend) {
+      await clearTelegramRetryState(retryKey);
+      continue;
+    }
 
     nextCursors[conversationId] = latestMessageId;
     changed = true;
+    await clearTelegramRetryState(retryKey);
+    } catch (error) {
+      await recordTelegramRetryFailure(retryKey, error);
+      conversationErrors.push(`${message.sender_name || message.receiver_name || conversationId}：${error?.message || "同步失败"}`);
+    }
   }
 
   if (changed) await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
+  if (conversationErrors.length > 0) {
+    throw new Error(`部分私信将在退避后重试：${conversationErrors.join("；")}`);
+  }
 }
 
 async function checkForNewNodeSeekActivity(config, kind) {
@@ -766,7 +929,7 @@ async function checkForNewNodeSeekActivity(config, kind) {
   let reachedKnownEntry = false;
 
   for (let page = 1; page <= TELEGRAM_ACTIVITY_PAGE_LIMIT; page += 1) {
-    const response = await fetch(`https://www.nodeseek.com${endpoint}?page=${page}`, {
+    const response = await fetchWithTimeout(`https://www.nodeseek.com${endpoint}?page=${page}`, {
       credentials: "include",
       headers: { Accept: "application/json" }
     });
@@ -829,7 +992,7 @@ async function checkForNewNodeSeekActivity(config, kind) {
       ...entry,
       quote: extracted?.quote || "",
       content
-    }));
+      }), `activity:${kind}:${normalizeTelegramActivityId(entry?.id)}`);
   }
 
   await saveTelegramActivityCursor(kind, discoveredIds, cursor);
@@ -921,7 +1084,7 @@ function buildTelegramNotificationPostUrl(entry) {
 }
 
 async function checkRssPosts(config) {
-  const response = await fetch(TELEGRAM_RSS_URL, {
+  const response = await fetchWithTimeout(TELEGRAM_RSS_URL, {
     credentials: "omit",
     headers: { Accept: "application/rss+xml, application/xml, text/xml" }
   });
@@ -948,7 +1111,8 @@ async function checkRssPosts(config) {
       await sendTelegramActivityNotification(
         config,
         "rss",
-        `NodeSeek 新帖\n板块：${board}\n${post.title}\n命中：${matched.join("、")}\n${post.link}`
+        `NodeSeek 新帖\n板块：${board}\n${post.title}\n命中：${matched.join("、")}\n${post.link}`,
+        `rss:${post.id}`
       );
       history.unshift({ id: post.id, title: post.title, link: post.link, notifiedAt: Date.now() });
     }
@@ -1081,14 +1245,17 @@ async function rememberTelegramOutgoingEcho(userIdValue, contentValue, origin = 
   const fingerprint = await getTelegramOutgoingEchoFingerprint(userId, contentValue);
   const now = Date.now();
   const cursorState = await chrome.storage.local.get({ [TELEGRAM_KEYS.messageCursors]: {} });
-  const conversationCursor = Object.entries(cursorState[TELEGRAM_KEYS.messageCursors] || {})
+  const conversationCursor = origin.baselineMessageId != null
+    ? String(origin.baselineMessageId)
+    : Object.entries(cursorState[TELEGRAM_KEYS.messageCursors] || {})
     .find(([conversationId]) => conversationId.split(":").includes(userId))?.[1];
   const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingMessageEchoes]: [] });
   const echoes = (Array.isArray(stored[TELEGRAM_KEYS.outgoingMessageEchoes])
     ? stored[TELEGRAM_KEYS.outgoingMessageEchoes] : [])
     .filter((echo) => echo?.userId && echo?.fingerprint
       && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS);
-  const id = crypto.randomUUID();
+  const id = String(origin.echoId || crypto.randomUUID());
+  if (echoes.some((echo) => echo.id === id)) return id;
   echoes.push({
     id,
     userId,
@@ -1104,6 +1271,34 @@ async function rememberTelegramOutgoingEcho(userIdValue, contentValue, origin = 
     [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes.slice(-TELEGRAM_OUTGOING_ECHO_LIMIT)
   });
   return id;
+}
+
+async function findNodeSeekOutgoingMessageForTelegramEcho(userIdValue, contentValue, baselineMessageIdValue) {
+  const userId = String(userIdValue || "").trim();
+  const baselineMessageId = Number(baselineMessageIdValue);
+  if (!userId || !Number.isFinite(baselineMessageId)) return null;
+  const currentUser = await fetchLuckyCurrentUser("https://www.nodeseek.com/");
+  const currentUserId = String(currentUser?.member_id || "").trim();
+  if (!currentUserId) throw new Error("无法确认当前 NodeSeek 账号，暂时无法核对发送结果");
+  const expectedFingerprint = await getTelegramOutgoingEchoFingerprint(userId, contentValue);
+  const conversation = await fetchNodeSeekConversationMessages(userId);
+  for (const message of conversation.msgArray) {
+    if (String(message?.sender_id || "") !== currentUserId
+        || String(message?.receiver_id || "") !== userId
+        || Number(message?.id) <= baselineMessageId) continue;
+    const fingerprint = await getTelegramOutgoingEchoFingerprint(userId, message?.content || "");
+    if (fingerprint === expectedFingerprint) return message;
+  }
+  return null;
+}
+
+async function getNodeSeekTelegramSendBaselineMessageId(userIdValue) {
+  const userId = String(userIdValue || "").trim();
+  const conversation = await fetchNodeSeekConversationMessages(userId);
+  return conversation.msgArray.reduce((latest, message) => {
+    const id = Number(message?.id);
+    return Number.isSafeInteger(id) && id > latest ? id : latest;
+  }, 0).toString();
 }
 
 async function updateTelegramOutgoingEchoStatus(echoIdValue, status) {
@@ -1156,7 +1351,10 @@ async function consumeTelegramOutgoingEcho(userIdValue, contentValue, messageIdV
       return null;
     }
     const match = echoes[matchIndex];
-    if (match.status === "sending") return { pending: true };
+    if (match.status === "sending"
+        && now - Number(match.createdAt) < TELEGRAM_OUTGOING_ECHO_PENDING_TIMEOUT_MS) {
+      return { pending: true };
+    }
     echoes.splice(matchIndex, 1);
     await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes });
     return { record: match };
@@ -1167,7 +1365,7 @@ async function consumeTelegramOutgoingEcho(userIdValue, contentValue, messageIdV
 
 async function fetchNodeSeekConversationMessages(userIdValue) {
   const userId = String(userIdValue || "").trim();
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `https://www.nodeseek.com/api/notification/message/with/${encodeURIComponent(userId)}`,
     { credentials: "include", cache: "no-store", headers: { Accept: "application/json" } }
   );
@@ -1212,7 +1410,7 @@ async function editTelegramTopicReadMarker(tokenValue, status, unread) {
     : originalIconId;
   if (!iconId) return false;
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/editForumTopic`, {
+    const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/editForumTopic`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1238,7 +1436,7 @@ async function getTelegramTopicUnreadIconCustomEmojiId(tokenValue) {
   }
 
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/getForumTopicIconStickers`);
+    const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/getForumTopicIconStickers`);
     const result = await response.json();
     if (!response.ok || result?.ok !== true || !Array.isArray(result.result)) return "";
     const normalizeEmoji = (value) => String(value || "").replace(/\uFE0F/g, "");
@@ -1492,7 +1690,29 @@ function extractTelegramMessageMedia(value) {
   return { text: normalizeTelegramMessageBody(text), imageUrls };
 }
 
-async function sendTelegramToTargets(config, text) {
+function getTelegramDeliveryTargetKey(target) {
+  return [String(target?.chatId || "").trim(), String(target?.topicId || "").trim(), String(target?.type || "")].join(":");
+}
+
+async function sendTelegramWithDeliveryReceipt(token, target, deliveryKey, partKey, send) {
+  const eventKey = String(deliveryKey || "").trim();
+  if (!eventKey) {
+    await send();
+    return;
+  }
+  const receiptKey = `${eventKey}:${getTelegramDeliveryTargetKey(target)}:${String(partKey || "message")}`;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.deliveryReceipts]: {} });
+  const receipts = { ...(stored[TELEGRAM_KEYS.deliveryReceipts] || {}) };
+  if (receipts[receiptKey]) return;
+  await send();
+  receipts[receiptKey] = Date.now();
+  const retainedReceipts = Object.fromEntries(Object.entries(receipts)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 1000));
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.deliveryReceipts]: retainedReceipts });
+}
+
+async function sendTelegramToTargets(config, text, deliveryKey = "") {
   const targetKeys = new Set();
   const targets = (Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [])
     .filter((target) => {
@@ -1503,7 +1723,12 @@ async function sendTelegramToTargets(config, text) {
       return true;
     });
   if (targets.length === 0) throw new Error("没有启用的 Telegram 推送目标");
-  for (const target of targets) await sendTelegramMessage(config[TELEGRAM_KEYS.token], target, text);
+  for (const target of targets) {
+    await sendTelegramWithDeliveryReceipt(
+      config[TELEGRAM_KEYS.token], target, deliveryKey, "message",
+      () => sendTelegramMessage(config[TELEGRAM_KEYS.token], target, text)
+    );
+  }
 }
 
 async function sendTelegramPrivateMessageToTopics(
@@ -1514,7 +1739,7 @@ async function sendTelegramPrivateMessageToTopics(
   fallbackText,
   topicKind = "dm",
   imageUrls = [],
-  { includeDirectTargets = true } = {}
+  { includeDirectTargets = true, deliveryKey = "" } = {}
 ) {
   const deliveredTopics = [];
   const targets = (Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [])
@@ -1526,7 +1751,7 @@ async function sendTelegramPrivateMessageToTopics(
   if (personalTargets.length === 0) {
     if (!includeDirectTargets) return deliveredTopics;
     if (imageUrls.length === 0) {
-      await sendTelegramToTargets(config, fallbackText);
+      await sendTelegramToTargets(config, fallbackText, deliveryKey);
       return deliveredTopics;
     }
     const targetKeys = new Set();
@@ -1534,7 +1759,9 @@ async function sendTelegramPrivateMessageToTopics(
       const key = `${String(target.chatId).trim()}:${String(target.topicId || "").trim()}`;
       if (targetKeys.has(key)) continue;
       targetKeys.add(key);
-      await sendTelegramPrivateMessageContent(config[TELEGRAM_KEYS.token], target, fallbackText, imageUrls);
+      await sendTelegramPrivateMessageContent(
+        config[TELEGRAM_KEYS.token], target, fallbackText, imageUrls, deliveryKey
+      );
     }
     return deliveredTopics;
   }
@@ -1548,20 +1775,25 @@ async function sendTelegramPrivateMessageToTopics(
       config[TELEGRAM_KEYS.token],
       { ...target, topicId: topic.topicId },
       topicText,
-      imageUrls
+      imageUrls,
+      deliveryKey
     );
     deliveredTopics.push({ chatId: String(target.chatId), topicId: String(topic.topicId), name: topic.name });
   }
   for (const target of otherTargets) {
-    await sendTelegramPrivateMessageContent(config[TELEGRAM_KEYS.token], target, fallbackText, imageUrls);
+    await sendTelegramPrivateMessageContent(
+      config[TELEGRAM_KEYS.token], target, fallbackText, imageUrls, deliveryKey
+    );
   }
   return deliveredTopics;
 }
 
-async function sendTelegramPrivateMessageContent(token, target, text, imageUrls = []) {
+async function sendTelegramPrivateMessageContent(token, target, text, imageUrls = [], deliveryKey = "") {
   const urls = [...new Set((Array.isArray(imageUrls) ? imageUrls : []).map((url) => String(url || "").trim()).filter(Boolean))];
   if (urls.length === 0) {
-    await sendTelegramMessage(token, target, text);
+    await sendTelegramWithDeliveryReceipt(
+      token, target, deliveryKey, "message", () => sendTelegramMessage(token, target, text)
+    );
     return;
   }
 
@@ -1570,19 +1802,29 @@ async function sendTelegramPrivateMessageContent(token, target, text, imageUrls 
   let textSent = false;
   for (const [index, url] of urls.entries()) {
     const caption = index === 0 && canUseCaption ? messageText : "";
+    const partKey = `image:${index}`;
     try {
-      await sendTelegramPhoto(token, target, url, caption);
+      await sendTelegramWithDeliveryReceipt(
+        token, target, deliveryKey, partKey, () => sendTelegramPhoto(token, target, url, caption)
+      );
       if (caption) textSent = true;
-    } catch (_error) {
+    } catch (error) {
+      if (!error?.telegramResponseReceived || Number(error.httpStatus) !== 400 || error.retryAfterSeconds) throw error;
       const fallbackText = [caption, `图片链接：${url}`].filter(Boolean).join("\n");
-      await sendTelegramMessage(token, target, fallbackText);
+      await sendTelegramWithDeliveryReceipt(
+        token, target, deliveryKey, partKey, () => sendTelegramMessage(token, target, fallbackText)
+      );
       if (caption) textSent = true;
     }
   }
-  if (messageText && !textSent) await sendTelegramMessage(token, target, messageText);
+  if (messageText && !textSent) {
+    await sendTelegramWithDeliveryReceipt(
+      token, target, deliveryKey, "caption", () => sendTelegramMessage(token, target, messageText)
+    );
+  }
 }
 
-async function sendTelegramActivityNotification(config, kind, text) {
+async function sendTelegramActivityNotification(config, kind, text, deliveryKey = "") {
   const targets = (Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [])
     .filter((target) => target?.enabled !== false && target?.chatId);
   if (targets.length === 0) throw new Error("没有启用的 Telegram 推送目标");
@@ -1590,16 +1832,25 @@ async function sendTelegramActivityNotification(config, kind, text) {
   const otherTargets = targets.filter((target) => target.type === "direct");
 
   if (personalTargets.length === 0) {
-    await sendTelegramToTargets(config, text);
+    await sendTelegramToTargets(config, text, deliveryKey);
     return;
   }
 
   for (const target of personalTargets) {
     const topicKind = kind === "at" ? "mention" : kind;
     const topic = await getOrCreateManagedTelegramTopic(config[TELEGRAM_KEYS.token], target.chatId, topicKind);
-    await sendTelegramMessage(config[TELEGRAM_KEYS.token], { ...target, topicId: topic.topicId }, text);
+    const topicTarget = { ...target, topicId: topic.topicId };
+    await sendTelegramWithDeliveryReceipt(
+      config[TELEGRAM_KEYS.token], topicTarget, deliveryKey, "message",
+      () => sendTelegramMessage(config[TELEGRAM_KEYS.token], topicTarget, text)
+    );
   }
-  for (const target of otherTargets) await sendTelegramMessage(config[TELEGRAM_KEYS.token], target, text);
+  for (const target of otherTargets) {
+    await sendTelegramWithDeliveryReceipt(
+      config[TELEGRAM_KEYS.token], target, deliveryKey, "message",
+      () => sendTelegramMessage(config[TELEGRAM_KEYS.token], target, text)
+    );
+  }
 }
 
 async function normalizeManagedSystemTopics(tokenValue, systemUserIdValue) {
@@ -1648,7 +1899,7 @@ async function applyManagedTelegramTopicStyle(tokenValue, topic, nameValue) {
       ...(nameChanged ? { name } : {}),
       ...(iconChanged ? { icon_custom_emoji_id: style.iconCustomEmojiId } : {})
     };
-    const response = await fetch(`https://api.telegram.org/bot${token}/editForumTopic`, {
+    const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/editForumTopic`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -1767,7 +2018,7 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { 
   }
 
   const style = getManagedTelegramTopicStyle({ kind });
-  const response = await fetch(`https://api.telegram.org/bot${token}/createForumTopic`, {
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/createForumTopic`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1817,9 +2068,12 @@ async function getTelegramUpdatesAndProcess(
     const offset = Math.max(storedOffset, requestedOffset);
     const offsetParam = offset > 0 ? `&offset=${offset}` : "";
     const allowedUpdates = encodeURIComponent(JSON.stringify(["message", "channel_post"]));
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://api.telegram.org/bot${token}/getUpdates?limit=100&timeout=${Math.max(0, Math.floor(Number(timeoutSeconds) || 0))}&allowed_updates=${allowedUpdates}${offsetParam}`,
-      signal ? { signal } : undefined
+      signal ? { signal } : {},
+      Number(timeoutSeconds) > 0
+        ? (Math.floor(Number(timeoutSeconds)) + 5) * 1000
+        : TELEGRAM_REQUEST_TIMEOUT_MS
     );
     const result = await response.json();
     if (!response.ok || !result?.ok) {
@@ -1837,8 +2091,8 @@ async function getTelegramUpdatesAndProcess(
     const lastUpdateId = updates.reduce((last, update) => Math.max(last, Number(update.update_id) || 0), 0);
     const nextOffset = lastUpdateId > 0 ? lastUpdateId + 1 : null;
     resolveTelegramUpdateBatchWaiters({ updates, nextOffset });
-    await processTelegramPersonalStartUpdateIfWatching(token, updates);
     await processTelegramManagedTopicUpdates(token, updates);
+    await processTelegramPersonalStartUpdateIfWatching(token, updates);
     if (lastUpdateId > 0) {
       await chrome.storage.local.set({ [TELEGRAM_PERSONAL_START_OFFSET_KEY]: Math.max(offset, lastUpdateId + 1) });
     }
@@ -1879,20 +2133,47 @@ function resolveTelegramUpdateBatchWaiters(batch) {
 async function processTelegramPersonalStartUpdateIfWatching(token, updates) {
   const watch = await chrome.storage.local.get({
     [TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]: 0,
-    [TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY]: 0
+    [TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY]: 0,
+    [TELEGRAM_KEYS.pendingStartUpdates]: []
   });
-  if (Number(watch[TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]) <= Date.now()) return;
-  const update = findTelegramPersonalStartUpdate(
-    updates,
-    Number(watch[TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY]) || 0
-  );
-  if (update) await registerTelegramPersonalStartUpdate(token, update);
+  const pending = Array.isArray(watch[TELEGRAM_KEYS.pendingStartUpdates])
+    ? [...watch[TELEGRAM_KEYS.pendingStartUpdates]] : [];
+  if (Number(watch[TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]) > Date.now()) {
+    const update = findTelegramPersonalStartUpdate(
+      updates,
+      Number(watch[TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY]) || 0
+    );
+    const updateId = Number(update?.update_id) || 0;
+    if (update && updateId > 0 && !pending.some((item) => Number(item?.updateId) === updateId)) {
+      pending.push({ updateId, update, attempts: 0, nextRetryAt: 0 });
+      await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingStartUpdates]: pending });
+    }
+  }
+
+  for (const item of [...pending].sort((a, b) => Number(a.updateId) - Number(b.updateId))) {
+    if (Number(item.nextRetryAt) > Date.now()) continue;
+    try {
+      await registerTelegramPersonalStartUpdate(token, item.update);
+      const remaining = pending.filter((candidate) => Number(candidate?.updateId) !== Number(item.updateId));
+      pending.splice(0, pending.length, ...remaining);
+      await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingStartUpdates]: pending });
+    } catch (error) {
+      item.attempts = (Number(item.attempts) || 0) + 1;
+      item.nextRetryAt = Date.now() + getTelegramUpdatesRetryDelayMs(item.attempts, error?.retryAfterSeconds);
+      item.lastError = String(error?.message || error || "接收目标添加失败").slice(0, 300);
+      await chrome.storage.local.set({
+        [TELEGRAM_KEYS.pendingStartUpdates]: pending,
+        [TELEGRAM_KEYS.lastError]: `Telegram /start 待重试：${item.lastError}`
+      });
+    }
+  }
 }
 
 async function processTelegramManagedTopicUpdates(token, updates) {
   const stored = await chrome.storage.local.get({
     [TELEGRAM_KEYS.managedTopics]: [],
     [TELEGRAM_KEYS.processedTopicUpdates]: [],
+    [TELEGRAM_KEYS.pendingTopicUpdates]: [],
     [TELEGRAM_KEYS.pendingTopicImageMarkdowns]: {},
     [TELEGRAM_KEYS.pendingTopicReadUserIds]: []
   });
@@ -1902,30 +2183,70 @@ async function processTelegramManagedTopicUpdates(token, updates) {
     .map((topic) => [`${String(topic.chatId)}:${String(topic.topicId)}`, topic]));
   const processedUpdateIds = new Set((Array.isArray(stored[TELEGRAM_KEYS.processedTopicUpdates])
     ? stored[TELEGRAM_KEYS.processedTopicUpdates] : []).map(String));
+  let pendingQueue = (Array.isArray(stored[TELEGRAM_KEYS.pendingTopicUpdates])
+    ? stored[TELEGRAM_KEYS.pendingTopicUpdates] : []).filter((item) =>
+    Array.isArray(item?.updates) && item.updates.length > 0 && item?.key
+      && item?.topic?.chatId && item?.topic?.topicId && item?.topic?.nsUserId);
   const pendingImageMarkdowns = { ...(stored[TELEGRAM_KEYS.pendingTopicImageMarkdowns] || {}) };
   const pendingReads = new Set((Array.isArray(stored[TELEGRAM_KEYS.pendingTopicReadUserIds])
     ? stored[TELEGRAM_KEYS.pendingTopicReadUserIds] : []).map(String));
 
-  for (const userId of [...pendingReads]) {
-    await markNodeSeekConversationRead(userId);
-    pendingReads.delete(userId);
-    await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicReadUserIds]: [...pendingReads] });
-  }
-
   const orderedUpdates = [...updates].sort((a, b) => Number(a.update_id) - Number(b.update_id));
+  const queuedKeys = new Set(pendingQueue.map((item) => String(item.key)));
   for (const updateGroup of groupTelegramManagedTopicUpdates(orderedUpdates)) {
     const pendingUpdates = updateGroup.filter((update) => {
       const updateId = String(Number(update?.update_id) || "");
       return updateId && !processedUpdateIds.has(updateId);
     });
     if (pendingUpdates.length === 0) continue;
-
-    const messages = pendingUpdates.map((update) => update?.message).filter(Boolean);
-    const message = messages[0];
+    const message = pendingUpdates.map((update) => update?.message).find(Boolean);
     const topicId = String(message?.message_thread_id || "");
     const chatId = String(message?.chat?.id || "");
     const topic = topicByKey.get(`${chatId}:${topicId}`);
     if (!topic || message?.chat?.type !== "private" || !message?.from || message.from.is_bot === true) continue;
+
+    const updateIds = pendingUpdates.map((update) => String(Number(update?.update_id) || "")).filter(Boolean);
+    const key = updateIds.join(":");
+    if (queuedKeys.has(key)) continue;
+    queuedKeys.add(key);
+    pendingQueue.push({
+      key,
+      updateIds,
+      updates: pendingUpdates,
+      topic: {
+        chatId: String(topic.chatId),
+        topicId: String(topic.topicId),
+        nsUserId: String(topic.nsUserId),
+        name: String(topic.name || "NodeSeek 用户")
+      },
+      attempts: 0,
+      nextRetryAt: 0,
+      failureNotified: false,
+      createdAt: Date.now()
+    });
+  }
+  pendingQueue.sort((a, b) => Number(a.updateIds?.[0]) - Number(b.updateIds?.[0]));
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue });
+
+  const blockedTopics = new Set();
+  for (const queueItem of [...pendingQueue]) {
+    const pendingUpdates = queueItem.updates.filter((update) => {
+      const updateId = String(Number(update?.update_id) || "");
+      return updateId && !processedUpdateIds.has(updateId);
+    });
+    if (pendingUpdates.length === 0) {
+      pendingQueue = pendingQueue.filter((item) => item.key !== queueItem.key);
+      continue;
+    }
+    const messages = pendingUpdates.map((update) => update?.message).filter(Boolean);
+    const message = messages[0];
+    const { chatId, topicId, nsUserId, name: topicName } = queueItem.topic;
+    const topicKey = `${chatId}:${topicId}`;
+    if (blockedTopics.has(topicKey) || Number(queueItem.nextRetryAt) > Date.now()) {
+      blockedTopics.add(topicKey);
+      continue;
+    }
+    try {
 
     const text = [...new Set(messages
       .map((item) => String(item.text || item.caption || "").trim())
@@ -1936,69 +2257,75 @@ async function processTelegramManagedTopicUpdates(token, updates) {
     })).filter((item) => item.updateId && item.image);
     if (!text && images.length === 0) {
       await sendTelegramMessage(token, { type: "personal", chatId, topicId }, "目前支持文字和图片私信；这条消息类型暂不支持。");
-      for (const update of pendingUpdates) {
-        processedUpdateIds.add(String(Number(update?.update_id) || ""));
+    } else {
+      const imageMarkdowns = [];
+      if (images.length > 0) {
+        try {
+          for (const item of images) {
+            let imageMarkdown = pendingImageMarkdowns[item.updateId] || "";
+            if (!imageMarkdown) {
+              const uploaded = await uploadTelegramMessageImage(token, item.image);
+              imageMarkdown = uploaded.markdown;
+              pendingImageMarkdowns[item.updateId] = imageMarkdown;
+              await chrome.storage.local.set({
+                [TELEGRAM_KEYS.pendingTopicImageMarkdowns]: pendingImageMarkdowns
+              });
+            }
+            imageMarkdowns.push(imageMarkdown);
+          }
+        } catch (error) {
+          if (!queueItem.failureNotified) {
+            const reason = String(error?.message || error || "图片上传失败").slice(0, 300);
+            const failureMessage = error?.code === "TELEGRAM_IMAGE_UPLOAD_DISABLED"
+              ? "图片未发送到 NodeSeek：请在扩展设置的「图床配置」中开启图床上传，开启后插件会自动重试。"
+              : `图片上传失败，插件会自动重试：${reason}`;
+            await sendTelegramMessage(token, { type: "personal", chatId, topicId }, failureMessage);
+            queueItem.failureNotified = true;
+          }
+          throw error;
+        }
       }
-      await chrome.storage.local.set({
-        [TELEGRAM_KEYS.processedTopicUpdates]: [...processedUpdateIds].slice(-500)
+
+      const content = [text, ...imageMarkdowns].filter(Boolean).join("\n\n");
+      let echoId = String(queueItem.echoId || "");
+      let baselineMessageId = queueItem.baselineMessageId;
+      if (!echoId) {
+        echoId = `telegram-update:${queueItem.key}`;
+        baselineMessageId = await getNodeSeekTelegramSendBaselineMessageId(nsUserId);
+        queueItem.echoId = echoId;
+        queueItem.baselineMessageId = baselineMessageId;
+        pendingQueue = pendingQueue.map((item) => item.key === queueItem.key ? queueItem : item);
+        await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue });
+      }
+
+      await rememberTelegramOutgoingEcho(nsUserId, content, {
+        chatId,
+        topicId,
+        topicName,
+        echoId,
+        ...(baselineMessageId != null ? { baselineMessageId } : {})
       });
-      continue;
-    }
 
-    const imageMarkdowns = [];
-    if (images.length > 0) {
-      try {
-        for (const item of images) {
-          let imageMarkdown = pendingImageMarkdowns[item.updateId] || "";
-          if (!imageMarkdown) {
-            const uploaded = await uploadTelegramMessageImage(token, item.image);
-            imageMarkdown = uploaded.markdown;
-            pendingImageMarkdowns[item.updateId] = imageMarkdown;
-            await chrome.storage.local.set({
-              [TELEGRAM_KEYS.pendingTopicImageMarkdowns]: pendingImageMarkdowns
-            });
-          }
-          imageMarkdowns.push(imageMarkdown);
-        }
-      } catch (error) {
-        const reason = String(error?.message || error || "图片上传失败").slice(0, 300);
-        const failureMessage = error?.code === "TELEGRAM_IMAGE_UPLOAD_DISABLED"
-          ? "图片未发送到 NodeSeek：请在扩展设置的「图床配置」中开启图床上传，然后重新发送图片。"
-          : `图片上传失败，未发送到 NodeSeek：${reason}`;
-        await sendTelegramMessage(
-          token,
-          { type: "personal", chatId, topicId },
-          failureMessage
+      let alreadySent = false;
+      if (baselineMessageId != null && String(baselineMessageId).trim()) {
+        const matchingMessage = await findNodeSeekOutgoingMessageForTelegramEcho(
+          nsUserId,
+          content,
+          baselineMessageId
         );
-        for (const update of pendingUpdates) {
-          const updateId = String(Number(update?.update_id) || "");
-          if (updateId) {
-            processedUpdateIds.add(updateId);
-            delete pendingImageMarkdowns[updateId];
-          }
+        if (matchingMessage) {
+          alreadySent = true;
+          await updateTelegramOutgoingEchoStatus(echoId, "sent");
         }
-        await chrome.storage.local.set({
-          [TELEGRAM_KEYS.processedTopicUpdates]: [...processedUpdateIds].slice(-500),
-          [TELEGRAM_KEYS.pendingTopicImageMarkdowns]: pendingImageMarkdowns
-        });
-        continue;
       }
+
+      if (!alreadySent) {
+        await sendNodeSeekPrivateMessage(nsUserId, content, imageMarkdowns.length > 0);
+        await updateTelegramOutgoingEchoStatus(echoId, "sent");
+      }
+      scheduleTelegramMonitorAlarm({ checkImmediately: true }).catch(() => {});
     }
 
-    const content = [text, ...imageMarkdowns].filter(Boolean).join("\n\n");
-    const echoId = await rememberTelegramOutgoingEcho(topic.nsUserId, content, {
-      chatId,
-      topicId,
-      topicName: topic.name
-    });
-    try {
-      await sendNodeSeekPrivateMessage(topic.nsUserId, content, imageMarkdowns.length > 0);
-      await updateTelegramOutgoingEchoStatus(echoId, "sent");
-    } catch (error) {
-      await discardTelegramOutgoingEcho(echoId);
-      throw error;
-    }
-    scheduleTelegramMonitorAlarm({ checkImmediately: true }).catch(() => {});
     for (const update of pendingUpdates) {
       const updateId = String(Number(update?.update_id) || "");
       if (updateId) {
@@ -2006,16 +2333,47 @@ async function processTelegramManagedTopicUpdates(token, updates) {
         delete pendingImageMarkdowns[updateId];
       }
     }
-    pendingReads.add(String(topic.nsUserId));
+    pendingQueue = pendingQueue.filter((item) => item.key !== queueItem.key);
     await chrome.storage.local.set({
       [TELEGRAM_KEYS.processedTopicUpdates]: [...processedUpdateIds].slice(-500),
+      [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue,
       [TELEGRAM_KEYS.pendingTopicImageMarkdowns]: pendingImageMarkdowns,
       [TELEGRAM_KEYS.pendingTopicReadUserIds]: [...pendingReads]
     });
-    await markNodeSeekConversationRead(topic.nsUserId);
-    pendingReads.delete(String(topic.nsUserId));
+    pendingReads.add(nsUserId);
     await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicReadUserIds]: [...pendingReads] });
+    } catch (error) {
+      queueItem.attempts = (Number(queueItem.attempts) || 0) + 1;
+      const delayMs = getTelegramUpdatesRetryDelayMs(queueItem.attempts, error?.retryAfterSeconds);
+      queueItem.nextRetryAt = Date.now() + delayMs;
+      queueItem.lastError = String(error?.message || error || "发送失败").slice(0, 300);
+      pendingQueue = pendingQueue.map((item) => item.key === queueItem.key ? queueItem : item);
+      await chrome.storage.local.set({
+        [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue,
+        [TELEGRAM_KEYS.lastError]: `TG 私信待重试：${queueItem.lastError}`
+      });
+      blockedTopics.add(topicKey);
+    }
   }
+  await processPendingTelegramTopicReads();
+}
+
+async function processPendingTelegramTopicReads() {
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.pendingTopicReadUserIds]: [] });
+  const pendingReads = new Set((Array.isArray(stored[TELEGRAM_KEYS.pendingTopicReadUserIds])
+    ? stored[TELEGRAM_KEYS.pendingTopicReadUserIds] : []).map(String).filter(Boolean));
+  for (const userId of pendingReads) {
+    try {
+      const completed = await runTelegramRetriableOperation(`nodeseek-mark-read:${userId}`, () =>
+        markNodeSeekConversationRead(userId));
+      if (completed) pendingReads.delete(userId);
+    } catch (error) {
+      await chrome.storage.local.set({
+        [TELEGRAM_KEYS.lastError]: `NodeSeek 私信已读状态待重试：${String(error?.message || error).slice(0, 300)}`
+      });
+    }
+  }
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicReadUserIds]: [...pendingReads] });
 }
 
 function groupTelegramManagedTopicUpdates(updates) {
@@ -2079,7 +2437,7 @@ async function uploadTelegramMessageImage(tokenValue, image) {
     throw error;
   }
 
-  const fileInfoResponse = await fetch(
+  const fileInfoResponse = await fetchWithTimeout(
     `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(image.fileId)}`
   );
   const fileInfo = await fileInfoResponse.json();
@@ -2089,7 +2447,7 @@ async function uploadTelegramMessageImage(tokenValue, image) {
   }
 
   const encodedFilePath = filePath.split("/").map(encodeURIComponent).join("/");
-  const fileResponse = await fetch(`https://api.telegram.org/file/bot${token}/${encodedFilePath}`, { credentials: "omit" });
+  const fileResponse = await fetchWithTimeout(`https://api.telegram.org/file/bot${token}/${encodedFilePath}`, { credentials: "omit" }, TELEGRAM_FILE_REQUEST_TIMEOUT_MS);
   if (!fileResponse.ok) throw new Error(`下载 Telegram 图片失败（HTTP ${fileResponse.status}）`);
   const blob = await fileResponse.blob();
   if (blob.size === 0 || blob.size > 20 * 1024 * 1024) throw new Error("Telegram 图片大小无效或超过 20 MB");
@@ -2138,10 +2496,10 @@ async function requestNodeSeekTelegramPage(operation, payload = {}) {
     let lastError = null;
     for (let attempt = 0; attempt < 12; attempt += 1) {
       try {
-        const response = await chrome.tabs.sendMessage(tab.id, {
+        const response = await promiseWithTimeout(chrome.tabs.sendMessage(tab.id, {
           type: "telegram:nodeSeekPageRequest",
           payload: { operation, ...payload }
-        });
+        }), 22_000, "NodeSeek 页面请求");
         if (response?.ok === true) return response.result;
         if (response) throw new Error(String(response.error || "NodeSeek 页面请求失败"));
       } catch (error) {
@@ -2217,7 +2575,7 @@ async function deleteTelegramManagedTopics(topicIdsValue) {
   let deleted = 0;
 
   for (const topic of deleting) {
-    const response = await fetch(`https://api.telegram.org/bot${token}/deleteForumTopic`, {
+    const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/deleteForumTopic`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: topic.chatId, message_thread_id: Number(topic.topicId) })
@@ -2253,7 +2611,7 @@ async function getTelegramBotInfo(tokenValue) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10_000);
   try {
-    response = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+    response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/getMe`, {
       cache: "no-store",
       credentials: "omit",
       redirect: "error",
@@ -2449,7 +2807,7 @@ async function getTelegramDirectTopicId(channelChatIdValue, updateOffsetValue = 
   const channelLookupId = /^-?\d+$/.test(channelChatId)
     ? channelChatId
     : `@${channelChatId.replace(/^@/, "")}`;
-  const channelResponse = await fetch(`https://api.telegram.org/bot${token}/getChat?chat_id=${encodeURIComponent(channelLookupId)}`);
+  const channelResponse = await fetchWithTimeout(`https://api.telegram.org/bot${token}/getChat?chat_id=${encodeURIComponent(channelLookupId)}`);
   const channelResult = await channelResponse.json();
   if (!channelResponse.ok || !channelResult?.ok || !channelResult.result?.id) {
     throw new Error(channelResult?.description || "无法识别该频道；请检查公开分享链接或 Chat ID");
@@ -2494,7 +2852,7 @@ async function getTelegramDirectTopicId(channelChatIdValue, updateOffsetValue = 
       matchingDirectChatIds.add(directChatId);
       continue;
     }
-    const directChatResponse = await fetch(
+    const directChatResponse = await fetchWithTimeout(
       `https://api.telegram.org/bot${token}/getChat?chat_id=${encodeURIComponent(directChatId)}`
     );
     const directChatResult = await directChatResponse.json();
@@ -2566,14 +2924,18 @@ async function sendTelegramPhoto(tokenValue, target, photoUrl, caption = "") {
     photo: url,
     ...(caption ? { caption: String(caption).slice(0, 1024) } : {})
   }, target);
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
   const result = await response.json();
   if (!response.ok || !result?.ok) {
-    throw new Error(result?.description || `Telegram 图片发送失败（HTTP ${response.status}）`);
+    const error = new Error(result?.description || `Telegram 图片发送失败（HTTP ${response.status}）`);
+    error.telegramResponseReceived = true;
+    error.httpStatus = response.status;
+    error.retryAfterSeconds = Number(result?.parameters?.retry_after) || 0;
+    throw error;
   }
 }
 
@@ -2586,13 +2948,17 @@ async function sendTelegramMessage(tokenValue, target, text, entities = null) {
     disable_web_page_preview: true,
     ...(Array.isArray(entities) && entities.length ? { entities } : {})
   }, target);
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
   const result = await response.json();
   if (!response.ok || !result?.ok) {
-    throw new Error(result?.description || `Telegram 返回 HTTP ${response.status}`);
+    const error = new Error(result?.description || `Telegram 返回 HTTP ${response.status}`);
+    error.telegramResponseReceived = true;
+    error.httpStatus = response.status;
+    error.retryAfterSeconds = Number(result?.parameters?.retry_after) || 0;
+    throw error;
   }
 }

@@ -133,6 +133,7 @@ test("page-context check-in uses the site's same-origin board and attendance req
     chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
     window,
     CustomEvent: MockCustomEvent,
+    AbortController,
     fetch: async (url, options = {}) => {
       requests.push({ url, method: options.method || "GET" });
       return options.method
@@ -187,6 +188,7 @@ test("page-context check-in skips the POST when today's record already exists", 
     chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
     window,
     CustomEvent: MockCustomEvent,
+    AbortController,
     fetch: async (url, options = {}) => {
       requests.push({ url, method: options.method || "GET" });
       return { ok: true, json: async () => ({ record: { gain: 4, created_at: "2026-11-13T00:01:00.000Z" } }) };
@@ -248,6 +250,7 @@ test("followed-post extraction reads the clean title instead of the pagination c
     chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
     window,
     CustomEvent: MockCustomEvent,
+    AbortController,
     DOMParser: MockDOMParser,
     fetch: async (url) => {
       requests.push(url);
@@ -315,6 +318,7 @@ test("activity page extraction separates a blockquote from the new comment text"
     chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
     window,
     CustomEvent: MockCustomEvent,
+    AbortController,
     DOMParser: MockDOMParser,
     fetch: async (url) => {
       requests.push(url);

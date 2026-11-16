@@ -24,17 +24,24 @@ async function uploadImage(payload) {
 
   if (apiKey) {
     try {
-      apiResponse = await fetch(DEFAULT_OPTIONS.uploadEndpoint, {
-        method: "POST",
-        headers: {
-          "Accept": "application/json",
-          "X-API-Key": apiKey
-        },
-        body: formData,
-        credentials: "omit",
-        redirect: "error"
-      });
-      apiResponseText = await apiResponse.text();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort("timeout"), 30_000);
+      try {
+        apiResponse = await fetch(DEFAULT_OPTIONS.uploadEndpoint, {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            "X-API-Key": apiKey
+          },
+          body: formData,
+          credentials: "omit",
+          redirect: "error",
+          signal: controller.signal
+        });
+        apiResponseText = await apiResponse.text();
+      } finally {
+        clearTimeout(timeoutId);
+      }
     } catch (error) {
       apiRequestError = String(error?.message || error || "网络请求失败");
     }
@@ -129,23 +136,30 @@ async function uploadImageViaNodeImagePage(file, fieldName) {
         }
         const formData = new FormData();
         formData.append(formFieldName, imageFile, imageFile.name);
-        const response = await fetch("https://api.nodeimage.com/upload", {
-          method: "POST",
-          headers: { "Accept": "application/json" },
-          body: formData,
-          credentials: "include",
-          redirect: "error"
-        });
-        return {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          contentType: response.headers.get("content-type") || "",
-          responseText: (await response.text()).slice(0, 4000),
-          fileName: imageFile.name,
-          fileType: imageFile.type,
-          fileSize: imageFile.size
-        };
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort("timeout"), 30_000);
+        try {
+          const response = await fetch("https://api.nodeimage.com/upload", {
+            method: "POST",
+            headers: { "Accept": "application/json" },
+            body: formData,
+            credentials: "include",
+            redirect: "error",
+            signal: controller.signal
+          });
+          return {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            contentType: response.headers.get("content-type") || "",
+            responseText: (await response.text()).slice(0, 4000),
+            fileName: imageFile.name,
+            fileType: imageFile.type,
+            fileSize: imageFile.size
+          };
+        } finally {
+          clearTimeout(timeoutId);
+        }
       },
       args: [{
         base64Value: base64,
