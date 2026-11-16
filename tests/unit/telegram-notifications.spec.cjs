@@ -368,9 +368,69 @@ test("Telegram Direct target sends the required topic identifier", async () => {
       chat_id: "-100123",
       text: "test",
       disable_web_page_preview: true,
+      disable_notification: false,
       direct_messages_topic_id: 456
     }
   });
+});
+
+test("Telegram messages are silent only when the focused Chrome window shows NodeSeek", async () => {
+  const cases = [
+    { name: "foreground NodeSeek", focused: true, url: "https://www.nodeseek.com/post-1", expected: true },
+    { name: "background NodeSeek", focused: false, url: "https://www.nodeseek.com/post-1", expected: false },
+    { name: "foreground Google", focused: true, url: "https://www.google.com/", expected: false },
+    { name: "background Google", focused: false, url: "https://www.google.com/", expected: false },
+    { name: "forced silent push overrides browser state", focused: false, url: "https://www.google.com/", silentEnabled: true, expected: true }
+  ];
+
+  for (const scenario of cases) {
+    let capturedPayload;
+    const sandbox = createSandbox(async (_url, options) => {
+      capturedPayload = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+    sandbox.chrome = {
+      storage: { local: {
+        get: async (defaults) => ({
+          ...defaults,
+          telegramSilentPushEnabled: scenario.silentEnabled === true
+        })
+      } },
+      windows: {
+        getLastFocused: async () => ({ focused: scenario.focused, id: 17 })
+      },
+      tabs: {
+        query: async () => [{ active: true, url: scenario.url }]
+      }
+    };
+
+    await vm.runInContext(
+      'sendTelegramMessage("123456:secret", { type: "personal", chatId: "333" }, "test")',
+      sandbox
+    );
+
+    expect(capturedPayload.disable_notification, scenario.name).toBe(scenario.expected);
+  }
+});
+
+test("Telegram photo sends use the same conditional and forced silent-push settings", async () => {
+  let capturedPayload;
+  const sandbox = createSandbox(async (_url, options) => {
+    capturedPayload = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  sandbox.chrome = {
+    storage: { local: { get: async (defaults) => ({ ...defaults, telegramSilentPushEnabled: true }) } },
+    windows: { getLastFocused: async () => ({ focused: false, id: 17 }) },
+    tabs: { query: async () => [{ active: true, url: "https://www.google.com/" }] }
+  };
+
+  await vm.runInContext(
+    'sendTelegramPhoto("123456:secret", { type: "personal", chatId: "333" }, "https://cdn.example/image.png", "caption")',
+    sandbox
+  );
+
+  expect(capturedPayload.disable_notification).toBe(true);
 });
 
 test("opening the bot starts a five-minute personal /start listener", async () => {
@@ -1242,6 +1302,7 @@ test("managed topic categories use distinct icons and colors while user topics s
     message_thread_id: 505,
     text: "Alice 开启了和你的私聊",
     disable_web_page_preview: true,
+    disable_notification: false,
     entities: [{ type: "code", offset: 0, length: 5 }]
   }]);
 });
@@ -1611,6 +1672,7 @@ test("Telegram tells the topic user to enable image hosting and keeps the update
   expect(telegramMessages[0].message_thread_id).toBe(456);
   expect(telegramMessages[0].text).toContain("图床配置");
   expect(telegramMessages[0].text).toContain("开启图床上传");
+  expect(telegramMessages[0].text).toContain("https://www.nodeimage.com/");
   expect(stored.telegramProcessedTopicUpdateIds || []).not.toContain("789");
   expect(stored.telegramPendingTopicUpdates).toEqual([expect.objectContaining({
     updateIds: ["789"],

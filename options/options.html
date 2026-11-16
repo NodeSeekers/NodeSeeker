@@ -419,8 +419,6 @@
           </section>
 
           <section id="telegramConfigGroup" class="config-group telegram-config-group" aria-labelledby="telegramMessageTitle">
-            <h3 id="telegramMessageTitle">Telegram 通知</h3>
-            <p class="config-description">个人接收目标会把私信、回复、提及和系统通知分 Topic；从私信 Topic 回信前，请在 BotFather 的 Threads Settings 开启 Threaded Mode。频道 Direct 保持原有通知方式。</p>
             <div class="telegram-section telegram-token-section">
               <label><span>Bot Token</span><input id="telegramBotToken" type="password" autocomplete="off" spellcheck="false"></label>
               <div class="telegram-token-status-row">
@@ -430,8 +428,8 @@
             </div>
 
             <div id="telegramProtectedSettings" hidden>
-              <section class="telegram-section" aria-labelledby="telegramTargetListTitle">
-                <h4 id="telegramTargetListTitle">推送目标</h4>
+              <fieldset class="telegram-target-settings">
+                <legend id="telegramTargetListTitle">步骤1.推送目标</legend>
                 <div class="telegram-target-form">
                   <select id="telegramTargetType" aria-label="目标类型">
                     <option value="personal">个人</option>
@@ -450,66 +448,74 @@
                   </div>
                 </div>
                 <ul id="telegramTargetList" class="telegram-target-list" aria-label="Telegram 推送目标"></ul>
-              </section>
+              </fieldset>
 
               <div id="telegramTargetDependentSettings" hidden>
-              <section id="telegramMonitorStatusCard" class="telegram-section telegram-monitor-status-card is-monitoring" aria-label="通知开关和监控状态">
-                <div class="telegram-notification-toggles">
-                  <label class="quick-page-option">
-                    <span>私信通知</span>
-                    <span class="switch switch-small">
-                      <input id="telegramMessageNotificationsEnabled" class="switch-input" type="checkbox">
-                      <span class="switch-track" aria-hidden="true"></span>
-                    </span>
-                  </label>
-                  <label class="quick-page-option">
-                    <span>新帖关键词通知</span>
-                    <span class="switch switch-small">
-                      <input id="telegramPostNotificationsEnabled" class="switch-input" type="checkbox">
-                      <span class="switch-track" aria-hidden="true"></span>
-                    </span>
-                  </label>
-                  <label class="quick-page-option">
-                    <span>提及通知</span>
-                    <span class="switch switch-small">
-                      <input id="telegramMentionNotificationsEnabled" class="switch-input" type="checkbox">
-                      <span class="switch-track" aria-hidden="true"></span>
-                    </span>
-                  </label>
-                  <label class="quick-page-option">
-                    <span>回复通知</span>
-                    <span class="switch switch-small">
-                      <input id="telegramReplyNotificationsEnabled" class="switch-input" type="checkbox">
-                      <span class="switch-track" aria-hidden="true"></span>
-                    </span>
-                  </label>
-                </div>
-                <div class="telegram-monitor-controls">
-                  <div class="telegram-monitor-interval">
-                    <label for="telegramMonitorIntervalSeconds">私信、提及、回复间隔</label>
-                    <select id="telegramMonitorIntervalSeconds">
-                      <option value="10">10 秒</option>
-                      <option value="30" selected>30 秒</option>
-                      <option value="60">1 分钟</option>
-                      <option value="300">5 分钟</option>
-                      <option value="900">15 分钟</option>
-                    </select>
+                <fieldset id="telegramMonitorStatusCard" class="telegram-notification-settings is-monitoring">
+                  <legend>步骤2.通知设置</legend>
+                  <div class="telegram-notification-toggles">
+                    <label class="quick-page-option">
+                      <span>私信</span>
+                      <span class="switch switch-small">
+                        <input id="telegramMessageNotificationsEnabled" class="switch-input" type="checkbox">
+                        <span class="switch-track" aria-hidden="true"></span>
+                      </span>
+                    </label>
+                    <label class="quick-page-option">
+                      <span>监控</span>
+                      <span class="switch switch-small">
+                        <input id="telegramPostNotificationsEnabled" class="switch-input" type="checkbox">
+                        <span class="switch-track" aria-hidden="true"></span>
+                      </span>
+                    </label>
+                    <label class="quick-page-option">
+                      <span>提及</span>
+                      <span class="switch switch-small">
+                        <input id="telegramMentionNotificationsEnabled" class="switch-input" type="checkbox">
+                        <span class="switch-track" aria-hidden="true"></span>
+                      </span>
+                    </label>
+                    <label class="quick-page-option">
+                      <span>回复</span>
+                      <span class="switch switch-small">
+                        <input id="telegramReplyNotificationsEnabled" class="switch-input" type="checkbox">
+                        <span class="switch-track" aria-hidden="true"></span>
+                      </span>
+                    </label>
                   </div>
-                  <div class="telegram-monitor-status-actions">
-                    <button id="toggleTelegramOfflineMessageSync" class="telegram-monitor-status-button is-monitoring" type="button" role="switch" aria-checked="true" aria-label="离线消息：已开启">
-                      <span>离线消息</span>
-                      <span class="telegram-monitor-switch" aria-hidden="true"><span></span></span>
-                    </button>
-                    <button id="toggleTelegramPause" class="telegram-monitor-status-button is-monitoring" type="button" role="switch" aria-checked="true" aria-label="监控状态：已开启">
-                      <span>监控状态</span>
-                      <span class="telegram-monitor-switch" aria-hidden="true"><span></span></span>
-                    </button>
+                  <div class="telegram-monitor-controls">
+                    <div class="telegram-monitor-heading">步骤3.监控设置</div>
+                    <div class="telegram-monitor-row">
+                      <div class="telegram-monitor-interval">
+                        <label for="telegramMonitorIntervalSeconds">检查间隔</label>
+                        <select id="telegramMonitorIntervalSeconds">
+                          <option value="10">10 秒</option>
+                          <option value="30" selected>30 秒</option>
+                          <option value="60">1 分钟</option>
+                          <option value="300">5 分钟</option>
+                          <option value="900">15 分钟</option>
+                        </select>
+                      </div>
+                      <div class="telegram-monitor-status-actions">
+                        <button id="toggleTelegramSilentPush" class="telegram-monitor-status-button" type="button" role="switch" aria-checked="false" aria-label="静音通知：已关闭">
+                          <span>静音通知</span>
+                          <span class="telegram-monitor-switch" aria-hidden="true"><span></span></span>
+                        </button>
+                        <button id="toggleTelegramOfflineMessageSync" class="telegram-monitor-status-button is-monitoring" type="button" role="switch" aria-checked="true" aria-label="离线消息：已开启">
+                          <span>离线消息</span>
+                          <span class="telegram-monitor-switch" aria-hidden="true"><span></span></span>
+                        </button>
+                        <button id="toggleTelegramPause" class="telegram-monitor-status-button is-monitoring" type="button" role="switch" aria-checked="true" aria-label="监控状态：已开启">
+                          <span>监控状态</span>
+                          <span class="telegram-monitor-switch" aria-hidden="true"><span></span></span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </section>
+                </fieldset>
 
-              <section class="telegram-section telegram-keyword-section" aria-labelledby="telegramKeywordTitle">
-                <h4 id="telegramKeywordTitle">关键词监控</h4>
+                <fieldset class="telegram-keyword-section telegram-keyword-settings">
+                <legend id="telegramKeywordTitle">关键词监控</legend>
                 <div class="telegram-keyword-form">
                   <input id="telegramKeywordInput" type="text" maxlength="120" placeholder="关键词或组合，例如：v.ps, gen2, 日本 家宽">
                   <input id="telegramKeywordExcludeInput" type="text" maxlength="300" placeholder="排除词（可选），例如：已出, 求购" aria-describedby="telegramKeywordExclusionHint">
@@ -524,7 +530,7 @@
                 <label><span>全局屏蔽词</span>
                   <textarea id="telegramBlockedKeywords" rows="3" placeholder="每行一个关键词"></textarea>
                 </label>
-              </section>
+                </fieldset>
 
               <section class="telegram-section telegram-board-section" aria-labelledby="telegramBoardTitle">
                 <div class="telegram-board-heading">
@@ -651,7 +657,7 @@
 
         <section id="telegram-panel" class="options-panel" hidden>
           <div class="panel-heading telegram-panel-heading">
-            <div><h2>Telegram 监控</h2><p>RSS 新帖关键词与 NodeSeek 私信通知</p></div>
+            <div><h2 id="telegramMessageTitle">Telegram 通知</h2><p>接收 NodeSeek 私信、回复、提及和关键词新帖提醒。</p></div>
           </div>
         </section>
 

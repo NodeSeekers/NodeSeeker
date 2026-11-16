@@ -31,11 +31,13 @@ test("configuration backups include editable Telegram settings", () => {
   expect(defaults.telegramMessageNotificationsEnabled).toBe(true);
   expect(defaults.telegramPostNotificationsEnabled).toBe(true);
   expect(defaults.telegramOfflineMessageSyncEnabled).toBe(true);
+  expect(defaults.telegramSilentPushEnabled).toBe(false);
   expect(Object.keys(defaults)).toEqual(expect.arrayContaining([
     "followRules",
     "telegramMessageNotificationsEnabled",
     "telegramPostNotificationsEnabled",
     "telegramOfflineMessageSyncEnabled",
+    "telegramSilentPushEnabled",
     "telegramMonitorPaused",
     "telegramBotToken",
     "telegramTargets",

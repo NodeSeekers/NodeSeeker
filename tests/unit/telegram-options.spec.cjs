@@ -48,6 +48,42 @@ test("offline-message switch defaults on and persists each toggle", async () => 
   expect(attributes["aria-checked"]).toBe("true");
 });
 
+test("silent-push switch defaults off and persists each toggle", async () => {
+  const storage = {};
+  const classes = new Set();
+  const attributes = {};
+  const button = {
+    classList: { toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name) },
+    setAttribute: (name, value) => { attributes[name] = value; },
+    title: ""
+  };
+  const sandbox = vm.createContext({
+    chrome: { storage: { local: {
+      get: async (defaults) => ({ ...defaults, ...storage }),
+      set: async (values) => Object.assign(storage, values)
+    } } },
+    document: { querySelector: () => button },
+    showToast: () => {}
+  });
+  vm.runInContext([
+    extractFunction("toggleTelegramSilentPush"),
+    extractFunction("renderTelegramSilentPush")
+  ].join("\n"), sandbox);
+
+  vm.runInContext("renderTelegramSilentPush({})", sandbox);
+  expect(attributes["aria-checked"]).toBe("false");
+  expect(classes.has("is-monitoring")).toBe(false);
+
+  await vm.runInContext("toggleTelegramSilentPush()", sandbox);
+  expect(storage.telegramSilentPushEnabled).toBe(true);
+  expect(attributes["aria-checked"]).toBe("true");
+  expect(classes.has("is-monitoring")).toBe(true);
+
+  await vm.runInContext("toggleTelegramSilentPush()", sandbox);
+  expect(storage.telegramSilentPushEnabled).toBe(false);
+  expect(attributes["aria-checked"]).toBe("false");
+});
+
 test("typing a Bot Token schedules automatic validation without a separate button", () => {
   const calls = [];
   const delays = [];

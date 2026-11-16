@@ -244,6 +244,7 @@ async function resetOptions() {
       "telegramMentionReplyNotificationsEnabled",
       "telegramMonitorIntervalSeconds",
       "telegramOfflineMessageSyncEnabled",
+      "telegramSilentPushEnabled",
       "telegramRssMonitorIntervalSeconds",
       "telegramBotToken",
       "telegramTargets",

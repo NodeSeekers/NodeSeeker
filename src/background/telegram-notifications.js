@@ -14,6 +14,9 @@ const TELEGRAM_KEYS = {
   topicReadMarkerIconId: "telegramTopicUnreadDistortedFaceIconCustomEmojiId",
   systemNotificationUserId: "telegramSystemNotificationUserId",
   managedTopics: "telegramManagedTopics",
+  settingsTopics: "telegramSettingsTopics",
+  settingsTopicIconId: "telegramSettingsTopicIconId",
+  settingsTopicIconVersion: "telegramSettingsTopicIconVersion",
   deliveryReceipts: "telegramDeliveryReceipts",
   processedTopicUpdates: "telegramProcessedTopicUpdateIds",
   pendingTopicUpdates: "telegramPendingTopicUpdates",
@@ -40,11 +43,14 @@ const TELEGRAM_OUTGOING_ECHO_LIMIT = 200;
 const TELEGRAM_OUTGOING_ECHO_TTL_MS = 2 * 60 * 60 * 1000;
 const TELEGRAM_OUTGOING_ECHO_PENDING_TIMEOUT_MS = 30 * 1000;
 const TELEGRAM_TOPIC_UNREAD_MARKER_TYPE = "topic-icon-eyes";
+const TELEGRAM_SETTINGS_CALLBACK_PREFIX = "nsh:";
+const TELEGRAM_SETTINGS_DIALOGS_PAGE_SIZE = 8;
 const TELEGRAM_TOPIC_STYLES = Object.freeze({
   system: Object.freeze({ name: "系统", iconCustomEmojiId: "5309984423003823246", iconColor: 16766590 }),
   rss: Object.freeze({ name: "监控", iconCustomEmojiId: "5309965701241379366", iconColor: 9367192 }),
   mention: Object.freeze({ name: "提及", iconCustomEmojiId: "5379748062124056162", iconColor: 16478047 }),
   reply: Object.freeze({ name: "回复", iconCustomEmojiId: "5417915203100613993", iconColor: 13338331 }),
+  settings: Object.freeze({ name: "Settings", iconCustomEmojiId: "5350554349074391003", iconColor: 7322096 }),
   dm: Object.freeze({ name: "", iconColor: 7322096 })
 });
 const TELEGRAM_DM_TOPIC_ICONS = Object.freeze([
@@ -151,6 +157,7 @@ let telegramUpdatesLongPollRunning = false;
 let telegramUpdatesAbortController = null;
 let telegramUpdatesActiveToken = "";
 let telegramUpdatesFailureCount = 0;
+let telegramSettingsCallbacksReady = false;
 const telegramUpdateBatchWaiters = new Set();
 const TELEGRAM_BOARD_NAMES = {
   daily: "日常",
@@ -421,8 +428,11 @@ function isTelegramUpdateLongPollNeeded(config) {
   const directScanActive = Number(config[TELEGRAM_DIRECT_TOPIC_SCAN_UNTIL_KEY]) > Date.now();
   if (watchActive || directScanActive) return true;
 
-  if (!isTelegramMonitorReady(config)) return false;
   const targets = Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [];
+  const hasPersonalSettingsTarget = targets.some((target) => target?.type !== "direct" && target?.chatId);
+  if (hasPersonalSettingsTarget) return true;
+
+  if (!isTelegramMonitorReady(config)) return false;
   const hasDirectTarget = targets.some((target) => target?.type === "direct" && target?.enabled !== false);
   const topics = Array.isArray(config[TELEGRAM_KEYS.managedTopics]) ? config[TELEGRAM_KEYS.managedTopics] : [];
   const hasPrivateMessageTopic = topics.some((topic) => topic?.kind === "dm" && topic?.chatId && topic?.topicId);
@@ -466,6 +476,9 @@ async function ensureTelegramUpdatesLongPoll() {
 }
 
 async function runTelegramUpdatesLongPoll() {
+  const settingsSessionStartedAt = Math.floor(Date.now() / 1000);
+  let discardFirstBatchCallbacks = true;
+  telegramSettingsCallbacksReady = false;
   try {
     while (true) {
       const config = await chrome.storage.local.get({
@@ -498,8 +511,11 @@ async function runTelegramUpdatesLongPoll() {
           token,
           null,
           TELEGRAM_UPDATES_LONG_POLL_TIMEOUT_SECONDS,
-          controller.signal
+          controller.signal,
+          { settingsSessionStartedAt, allowSettingsCallbacks: !discardFirstBatchCallbacks }
         );
+        discardFirstBatchCallbacks = false;
+        telegramSettingsCallbacksReady = true;
         telegramUpdatesFailureCount = 0;
         await chrome.storage.local.set({
           [TELEGRAM_KEYS.updatesRetryState]: { failureCount: 0, nextRetryAt: 0 }
@@ -1438,7 +1454,12 @@ async function getTelegramTopicUnreadIconCustomEmojiId(tokenValue) {
   try {
     const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/getForumTopicIconStickers`);
     const result = await response.json();
-    if (!response.ok || result?.ok !== true || !Array.isArray(result.result)) return "";
+    if (!response.ok || result?.ok !== true || !Array.isArray(result.result)) {
+      await chrome.storage.local.set({
+        [TELEGRAM_KEYS.lastError]: `获取 Telegram 主题图标失败：${String(result?.description || `HTTP ${response.status}`).slice(0, 220)}`
+      });
+      return "";
+    }
     const normalizeEmoji = (value) => String(value || "").replace(/\uFE0F/g, "");
     const preferredEmojis = ["👀"];
     for (const emoji of preferredEmojis) {
@@ -2055,19 +2076,30 @@ async function getTelegramUpdatesAndProcess(
   tokenValue,
   requestedOffsetValue = null,
   timeoutSeconds = 0,
-  signal = undefined
+  signal = undefined,
+  settingsContext = {}
 ) {
   if (telegramUpdatesCheckInFlight) throw new Error("Telegram 更新正在读取，请稍后重试");
   const token = String(tokenValue || "").trim();
   if (!token) throw new Error("请先填写 Bot Token");
   telegramUpdatesCheckInFlight = true;
   try {
-    const state = await chrome.storage.local.get({ [TELEGRAM_PERSONAL_START_OFFSET_KEY]: 0 });
+    const state = await chrome.storage.local.get({
+      [TELEGRAM_PERSONAL_START_OFFSET_KEY]: 0,
+      [TELEGRAM_KEYS.targets]: [],
+      [TELEGRAM_KEYS.messagesEnabled]: true,
+      [TELEGRAM_KEYS.postsEnabled]: true,
+      [TELEGRAM_KEYS.mentionEnabled]: false,
+      [TELEGRAM_KEYS.replyEnabled]: false,
+      [TELEGRAM_KEYS.managedTopics]: [],
+      [TELEGRAM_KEYS.paused]: false,
+      telegramMentionReplyNotificationsEnabled: false
+    });
     const storedOffset = Number(state[TELEGRAM_PERSONAL_START_OFFSET_KEY]) || 0;
     const requestedOffset = Number.isSafeInteger(Number(requestedOffsetValue)) ? Number(requestedOffsetValue) : 0;
     const offset = Math.max(storedOffset, requestedOffset);
     const offsetParam = offset > 0 ? `&offset=${offset}` : "";
-    const allowedUpdates = encodeURIComponent(JSON.stringify(["message", "channel_post"]));
+    const allowedUpdates = encodeURIComponent(JSON.stringify(["message", "channel_post", "callback_query"]));
     const response = await fetchWithTimeout(
       `https://api.telegram.org/bot${token}/getUpdates?limit=100&timeout=${Math.max(0, Math.floor(Number(timeoutSeconds) || 0))}&allowed_updates=${allowedUpdates}${offsetParam}`,
       signal ? { signal } : {},
@@ -2091,8 +2123,13 @@ async function getTelegramUpdatesAndProcess(
     const lastUpdateId = updates.reduce((last, update) => Math.max(last, Number(update.update_id) || 0), 0);
     const nextOffset = lastUpdateId > 0 ? lastUpdateId + 1 : null;
     resolveTelegramUpdateBatchWaiters({ updates, nextOffset });
-    await processTelegramManagedTopicUpdates(token, updates);
-    await processTelegramPersonalStartUpdateIfWatching(token, updates);
+    await processTelegramDeletedTopicUpdates(updates);
+    if (isTelegramMonitorReady(state)) await processTelegramManagedTopicUpdates(token, updates);
+    await processTelegramPersonalStartUpdateIfWatching(token, updates, settingsContext.settingsSessionStartedAt || 0);
+    await processTelegramSettingsUpdates(token, updates, {
+      ...settingsContext,
+      allowSettingsCallbacks: settingsContext.allowSettingsCallbacks === true || telegramSettingsCallbacksReady
+    });
     if (lastUpdateId > 0) {
       await chrome.storage.local.set({ [TELEGRAM_PERSONAL_START_OFFSET_KEY]: Math.max(offset, lastUpdateId + 1) });
     }
@@ -2130,7 +2167,7 @@ function resolveTelegramUpdateBatchWaiters(batch) {
   telegramUpdateBatchWaiters.clear();
 }
 
-async function processTelegramPersonalStartUpdateIfWatching(token, updates) {
+async function processTelegramPersonalStartUpdateIfWatching(token, updates, sessionStartedAt = 0) {
   const watch = await chrome.storage.local.get({
     [TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]: 0,
     [TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY]: 0,
@@ -2138,11 +2175,12 @@ async function processTelegramPersonalStartUpdateIfWatching(token, updates) {
   });
   const pending = Array.isArray(watch[TELEGRAM_KEYS.pendingStartUpdates])
     ? [...watch[TELEGRAM_KEYS.pendingStartUpdates]] : [];
+  const minimumStartDate = Math.max(
+    Number(watch[TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY]) || 0,
+    Number(sessionStartedAt) || 0
+  );
   if (Number(watch[TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]) > Date.now()) {
-    const update = findTelegramPersonalStartUpdate(
-      updates,
-      Number(watch[TELEGRAM_PERSONAL_START_WATCH_SINCE_KEY]) || 0
-    );
+    const update = findTelegramPersonalStartUpdate(updates, minimumStartDate);
     const updateId = Number(update?.update_id) || 0;
     if (update && updateId > 0 && !pending.some((item) => Number(item?.updateId) === updateId)) {
       pending.push({ updateId, update, attempts: 0, nextRetryAt: 0 });
@@ -2151,6 +2189,13 @@ async function processTelegramPersonalStartUpdateIfWatching(token, updates) {
   }
 
   for (const item of [...pending].sort((a, b) => Number(a.updateId) - Number(b.updateId))) {
+    const messageDate = Number(item.update?.message?.date) || 0;
+    if (minimumStartDate && messageDate && messageDate < minimumStartDate) {
+      const remaining = pending.filter((candidate) => Number(candidate?.updateId) !== Number(item.updateId));
+      pending.splice(0, pending.length, ...remaining);
+      await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingStartUpdates]: pending });
+      continue;
+    }
     if (Number(item.nextRetryAt) > Date.now()) continue;
     try {
       await registerTelegramPersonalStartUpdate(token, item.update);
@@ -2167,6 +2212,643 @@ async function processTelegramPersonalStartUpdateIfWatching(token, updates) {
       });
     }
   }
+}
+
+async function processTelegramSettingsUpdates(token, updates, settingsContext = {}) {
+  const state = await chrome.storage.local.get({
+    [TELEGRAM_KEYS.targets]: [],
+    [TELEGRAM_KEYS.managedTopics]: [],
+    [TELEGRAM_KEYS.settingsTopics]: [],
+    [TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]: 0,
+    telegramSilentPushEnabled: false
+  });
+  let lastStartUpdateId = Number(state[TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]) || 0;
+  const targets = Array.isArray(state[TELEGRAM_KEYS.targets]) ? state[TELEGRAM_KEYS.targets] : [];
+  const orderedUpdates = [...updates].sort((a, b) => Number(a.update_id) - Number(b.update_id));
+  const sessionStartedAt = Number(settingsContext.settingsSessionStartedAt) || 0;
+
+  for (const update of orderedUpdates) {
+    const message = update?.message;
+    const updateId = Number(update?.update_id) || 0;
+    if (!message || updateId <= lastStartUpdateId || message.chat?.type !== "private") continue;
+    const messageText = String(message.text || "").trim();
+    const isStartCommand = /^\/start(?:@\w+)?(?:\s+[^\s]+)?$/i.test(messageText);
+    const normalizedButtonText = messageText.replace(/[\uFE0E\uFE0F\u200D]/g, "").replace(/\s+/g, "");
+    const isSettingsButton = normalizedButtonText === "打开设置" || normalizedButtonText === "⚙打开设置";
+    const isHideKeyboardButton = normalizedButtonText === "收起键盘";
+    if (!isStartCommand && !isSettingsButton && !isHideKeyboardButton) continue;
+    const messageDate = Number(message.date) || 0;
+    if (sessionStartedAt && (!messageDate || messageDate < sessionStartedAt)) continue;
+    const chatId = String(message.chat.id || "");
+    const isConfiguredTarget = targets.some((target) => target?.type !== "direct"
+      && String(target?.chatId || "") === chatId);
+    if (!isConfiguredTarget) continue;
+
+    try {
+      if (isHideKeyboardButton) {
+        const configuredSettingsTopic = (Array.isArray(state[TELEGRAM_KEYS.settingsTopics])
+          ? state[TELEGRAM_KEYS.settingsTopics] : [])
+          .find((topic) => String(topic.chatId) === chatId);
+        await removeTelegramSettingsReplyKeyboard(token, chatId, configuredSettingsTopic, message.message_thread_id);
+      } else if (isStartCommand) {
+        await ensureTelegramSettingsEntry(token, chatId);
+      } else {
+        await showTelegramSettingsHome(token, chatId);
+      }
+      lastStartUpdateId = updateId;
+      await chrome.storage.local.set({ [TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]: updateId });
+    } catch (error) {
+      await chrome.storage.local.set({
+        [TELEGRAM_KEYS.lastError]: `Telegram 设置菜单发送失败：${String(error?.message || error).slice(0, 260)}`
+      });
+    }
+  }
+
+  if (settingsContext.allowSettingsCallbacks !== true) return;
+  for (const update of orderedUpdates) {
+    if (!update?.callback_query) continue;
+    try {
+      await processTelegramSettingsCallback(token, update.callback_query);
+    } catch (error) {
+      await answerTelegramCallbackQuery(token, update.callback_query.id, String(error?.message || "设置操作失败").slice(0, 180), true);
+    }
+  }
+}
+
+async function processTelegramDeletedTopicUpdates(updates) {
+  const deleted = updates.map((update) => {
+    const message = update?.message;
+    if (!message?.forum_topic_deleted) return null;
+    const chatId = String(message.chat?.id || "");
+    const topicId = String(message.message_thread_id || "");
+    return chatId && topicId ? `${chatId}:${topicId}` : null;
+  }).filter(Boolean);
+  if (deleted.length === 0) return;
+
+  const deletedKeys = new Set(deleted);
+  const stored = await chrome.storage.local.get({
+    [TELEGRAM_KEYS.managedTopics]: [],
+    [TELEGRAM_KEYS.settingsTopics]: []
+  });
+  const managedTopics = Array.isArray(stored[TELEGRAM_KEYS.managedTopics]) ? stored[TELEGRAM_KEYS.managedTopics] : [];
+  const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+  const retainedManaged = managedTopics.filter((topic) => !deletedKeys.has(`${String(topic.chatId)}:${String(topic.topicId)}`));
+  const retainedSettings = settingsTopics.filter((topic) => !deletedKeys.has(`${String(topic.chatId)}:${String(topic.topicId)}`));
+  if (retainedManaged.length !== managedTopics.length || retainedSettings.length !== settingsTopics.length) {
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.managedTopics]: retainedManaged,
+      [TELEGRAM_KEYS.settingsTopics]: retainedSettings
+    });
+  }
+}
+
+async function getOrCreateTelegramSettingsTopic(tokenValue, chatIdValue) {
+  const token = String(tokenValue || "").trim();
+  const chatId = String(chatIdValue || "").trim();
+  if (!token || !chatId) throw new Error("无法识别 Telegram 私聊目标");
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.settingsTopics]: [] });
+  const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+  const existing = settingsTopics.find((topic) => String(topic.chatId) === chatId);
+  const style = TELEGRAM_TOPIC_STYLES.settings;
+  const iconCustomEmojiId = await getTelegramSettingsTopicIconCustomEmojiId();
+  if (existing) {
+    const nameChanged = String(existing.name || "") !== style.name;
+    const iconChanged = String(existing.iconCustomEmojiId || "") !== iconCustomEmojiId;
+    if (nameChanged || iconChanged) {
+      try {
+        await callTelegramSettingsApi(token, "editForumTopic", {
+          chat_id: chatId,
+          message_thread_id: Number(existing.topicId),
+          ...(nameChanged ? { name: style.name } : {}),
+          ...(iconChanged ? { icon_custom_emoji_id: iconCustomEmojiId } : {})
+        });
+        const updated = { ...existing, name: style.name, iconCustomEmojiId };
+        await chrome.storage.local.set({
+          [TELEGRAM_KEYS.settingsTopics]: settingsTopics.map((topic) => topic.id === existing.id ? updated : topic)
+        });
+        return updated;
+      } catch (error) {
+        await chrome.storage.local.set({
+          [TELEGRAM_KEYS.lastError]: `设置主题名称或图标更新失败：${String(error?.message || error).slice(0, 220)}`
+        });
+        // Keep using the existing settings topic if Telegram rejects the update.
+      }
+    }
+    return existing;
+  }
+
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/createForumTopic`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      name: style.name,
+      icon_color: style.iconColor,
+      ...(iconCustomEmojiId ? { icon_custom_emoji_id: iconCustomEmojiId } : {})
+    })
+  });
+  const result = await response.json();
+  const topicId = String(result?.result?.message_thread_id || "");
+  if (!response.ok || result?.ok !== true || !topicId) {
+    throw new Error(result?.description || `创建 Telegram ${style.name} 主题失败（HTTP ${response.status}）`);
+  }
+
+  const topic = {
+    id: crypto.randomUUID(),
+    kind: "settings",
+    chatId,
+    topicId,
+    name: style.name,
+    iconCustomEmojiId,
+    iconColor: style.iconColor,
+    menuMessageId: 0,
+    createdAt: Date.now()
+  };
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.settingsTopics]: [...settingsTopics, topic] });
+  return topic;
+}
+
+async function getTelegramSettingsTopicIconCustomEmojiId() {
+  const iconId = String(TELEGRAM_TOPIC_STYLES.settings.iconCustomEmojiId || "");
+  const stored = await chrome.storage.local.get({
+    [TELEGRAM_KEYS.settingsTopicIconId]: "",
+    [TELEGRAM_KEYS.settingsTopicIconVersion]: 0
+  });
+  if (String(stored[TELEGRAM_KEYS.settingsTopicIconId] || "") !== iconId
+    || Number(stored[TELEGRAM_KEYS.settingsTopicIconVersion]) < 4) {
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.settingsTopicIconId]: iconId,
+      [TELEGRAM_KEYS.settingsTopicIconVersion]: 4
+    });
+  }
+  return iconId;
+}
+
+function buildTelegramSettingsHomeScreen(silentEnabled) {
+  return {
+    text: "NodeSeek 设置",
+    replyMarkup: {
+      inline_keyboard: [[
+        { text: silentEnabled ? "✅ 静音设置" : "静音设置", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}mute` },
+        { text: "对话管理", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}dialogs:0` }
+      ]]
+    }
+  };
+}
+
+function getTelegramManagedTopicListIcon(topic) {
+  if (topic?.kind === "dm") {
+    return TELEGRAM_DM_TOPIC_ICONS.find((icon) => icon.customEmojiId === String(topic.iconCustomEmojiId || ""))?.emoji || "💬";
+  }
+  return ({ system: "🟡", rss: "📡", mention: "@", reply: "💬", settings: "💻" })[topic?.kind] || "💬";
+}
+
+function getTelegramSettingsDialogTopics(chatIdValue, managedTopicsValue, settingsTopicsValue) {
+  const chatId = String(chatIdValue || "");
+  const topics = [
+    ...(Array.isArray(managedTopicsValue) ? managedTopicsValue : []),
+    ...(Array.isArray(settingsTopicsValue) ? settingsTopicsValue : [])
+  ];
+  const uniqueTopics = new Map();
+  for (const topic of topics) {
+    if (String(topic?.chatId || "") !== chatId || !topic?.id || !topic?.topicId) continue;
+    uniqueTopics.set(`${chatId}:${String(topic.topicId)}`, topic);
+  }
+  return [...uniqueTopics.values()]
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-Hans"));
+}
+
+function buildTelegramSettingsDialogsScreen(topics, pageValue = 0, selectedIdsValue = [], notice = "") {
+  const pageSize = TELEGRAM_SETTINGS_DIALOGS_PAGE_SIZE;
+  const pageCount = Math.max(1, Math.ceil(topics.length / pageSize));
+  const page = Math.min(Math.max(0, Number(pageValue) || 0), pageCount - 1);
+  const pageTopics = topics.slice(page * pageSize, (page + 1) * pageSize);
+  const selectedIds = new Set((Array.isArray(selectedIdsValue) ? selectedIdsValue : []).map(String));
+  const rows = pageTopics.map((topic) => [{
+    text: `${selectedIds.has(String(topic.id)) ? "✅" : "⬜️"} ${getTelegramManagedTopicListIcon(topic)} ${String(topic.name || "未命名对话").slice(0, 42)}`,
+    callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}toggle:${topic.id}:${page}`
+  }]);
+  if (topics.length) {
+    rows.push([
+      { text: `删除已选（${selectedIds.size}）`, callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}delete-selected:${page}` },
+      { text: "全选", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}select-all:${page}` }
+    ]);
+    rows.push([
+      { text: "清空选择", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}clear-selection:${page}` },
+      { text: "返回", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}home` }
+    ]);
+  } else {
+    rows.push([{ text: "返回", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}home` }]);
+  }
+  const navigation = [];
+  if (page > 0) navigation.push({ text: "上一页", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}dialogs:${page - 1}` });
+  if (pageCount > 1) navigation.push({ text: `${page + 1}/${pageCount}`, callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}dialogs:${page}` });
+  if (page + 1 < pageCount) navigation.push({ text: "下一页", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}dialogs:${page + 1}` });
+  if (navigation.length) rows.push(navigation);
+  const selectedCount = selectedIds.size;
+  return {
+    text: `${notice ? `${notice}\n` : ""}${topics.length
+      ? `对话管理（${topics.length}）\n勾选要删除的对话，可多选；删除前会再次确认。${selectedCount ? `\n已选 ${selectedCount} 个。` : ""}`
+      : "对话管理\n当前没有可管理的对话。"}`,
+    replyMarkup: { inline_keyboard: rows }
+  };
+}
+
+function buildTelegramSettingsDeleteConfirmScreen(selectedTopics, page) {
+  const preview = selectedTopics.slice(0, 5)
+    .map((topic) => `${getTelegramManagedTopicListIcon(topic)} ${String(topic.name || "未命名对话").slice(0, 48)}`)
+    .join("\n");
+  const remaining = selectedTopics.length > 5 ? `\n另有 ${selectedTopics.length - 5} 个对话` : "";
+  return {
+    text: `确认删除选中的 ${selectedTopics.length} 个对话及其中的消息？\n${preview}${remaining}`,
+    replyMarkup: {
+      inline_keyboard: [[
+        { text: `确认删除（${selectedTopics.length}）`, callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}confirm-delete:${page}` },
+        { text: "取消", callback_data: `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}dialogs:${page}` }
+      ]]
+    }
+  };
+}
+
+async function updateTelegramSettingsDialogSelection(chatIdValue, topicIdValue, selectedIds) {
+  const chatId = String(chatIdValue || "");
+  const topicId = String(topicIdValue || "");
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.settingsTopics]: [] });
+  const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+  await chrome.storage.local.set({
+    [TELEGRAM_KEYS.settingsTopics]: settingsTopics.map((topic) => String(topic.chatId) === chatId
+      && String(topic.topicId) === topicId
+      ? { ...topic, selectedDialogIds: [...new Set((Array.isArray(selectedIds) ? selectedIds : []).map(String))] }
+      : topic)
+  });
+}
+
+async function editTelegramSettingsMessage(tokenValue, topic, messageIdValue, screen) {
+  const token = String(tokenValue || "").trim();
+  const chatId = String(topic?.chatId || "");
+  const topicId = String(topic?.topicId || "");
+  const messageId = Number(messageIdValue) || 0;
+  if (!token || !chatId || !topicId) throw new Error("设置主题信息不完整");
+
+  if (messageId > 0) {
+    try {
+      await callTelegramSettingsApi(token, "editMessageText", {
+        chat_id: chatId,
+        message_id: messageId,
+        text: screen.text,
+        reply_markup: screen.replyMarkup
+      });
+      await updateTelegramSettingsMenuMessageId(chatId, topicId, messageId);
+      return messageId;
+    } catch (error) {
+      if (/message is not modified/i.test(String(error?.message || ""))) return messageId;
+    }
+  }
+
+  const result = await callTelegramSettingsApi(token, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: Number(topicId),
+    text: screen.text,
+    disable_notification: await shouldSendTelegramSilently(),
+    reply_markup: screen.replyMarkup
+  });
+  const newMessageId = Number(result?.message_id) || 0;
+  if (!newMessageId) throw new Error("Telegram 没有返回设置消息编号");
+  await updateTelegramSettingsMenuMessageId(chatId, topicId, newMessageId);
+  return newMessageId;
+}
+
+async function updateTelegramSettingsMenuMessageId(chatId, topicId, messageId) {
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.settingsTopics]: [] });
+  const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+  const nextTopics = settingsTopics.map((topic) => String(topic.chatId) === String(chatId)
+    && String(topic.topicId) === String(topicId) ? { ...topic, menuMessageId: Number(messageId) } : topic);
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.settingsTopics]: nextTopics });
+}
+
+async function showTelegramSettingsHome(token, chatId) {
+  const topic = await ensureTelegramSettingsEntry(token, chatId);
+  const settings = await chrome.storage.local.get({ telegramSilentPushEnabled: false });
+  if (Number(topic.menuMessageId) > 0) {
+    try {
+      await callTelegramSettingsApi(token, "editMessageReplyMarkup", {
+        chat_id: chatId,
+        message_id: Number(topic.menuMessageId),
+        reply_markup: { inline_keyboard: [] }
+      });
+    } catch (_error) {
+      // The prior menu may have been deleted; a new menu is still sent below.
+    }
+  }
+  return editTelegramSettingsMessage(
+    token,
+    topic,
+    0,
+    buildTelegramSettingsHomeScreen(settings.telegramSilentPushEnabled === true)
+  );
+}
+
+async function ensureTelegramSettingsEntry(tokenValue, chatIdValue) {
+  const token = String(tokenValue || "").trim();
+  const chatId = String(chatIdValue || "").trim();
+  let topic = await getOrCreateTelegramSettingsTopic(token, chatId);
+  topic = await ensureTelegramSettingsCommandMenu(token, chatId, topic);
+  return ensureTelegramSettingsReplyKeyboard(token, chatId, topic);
+}
+
+async function ensureTelegramSettingsCommandMenu(tokenValue, chatIdValue, topic) {
+  const token = String(tokenValue || "").trim();
+  const chatId = String(chatIdValue || "").trim();
+  if (!token || !chatId || !topic?.topicId) return topic;
+  if (Number(topic.commandMenuVersion) >= 1) return topic;
+
+  try {
+    const scope = { type: "chat", chat_id: Number(chatId) };
+    let commands = await callTelegramSettingsApi(token, "getMyCommands", {
+      scope,
+      language_code: "zh"
+    });
+    if (!Array.isArray(commands) || commands.length === 0) {
+      commands = await callTelegramSettingsApi(token, "getMyCommands", { language_code: "zh" });
+    }
+    const preservedCommands = Array.isArray(commands) ? [...commands] : [];
+    const startCommand = preservedCommands.find((command) => String(command?.command || "") === "start");
+    const nextCommands = preservedCommands.filter((command) => String(command?.command || "") !== "start");
+    nextCommands.push({
+      command: "start",
+      description: "打开 NodeSeek 设置"
+    });
+    await callTelegramSettingsApi(token, "setMyCommands", {
+      commands: nextCommands.slice(0, 100),
+      scope,
+      language_code: "zh"
+    });
+    const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.settingsTopics]: [] });
+    const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+    const updated = { ...topic, commandMenuVersion: 1 };
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.settingsTopics]: settingsTopics.map((item) => item.id === topic.id ? updated : item)
+    });
+    return updated;
+  } catch (error) {
+    await chrome.storage.local.set({
+      [TELEGRAM_KEYS.lastError]: `Telegram 设置命令菜单更新失败：${String(error?.message || error).slice(0, 240)}`
+    });
+    return topic;
+  }
+}
+
+async function ensureTelegramSettingsReplyKeyboard(tokenValue, chatIdValue, topic) {
+  const token = String(tokenValue || "").trim();
+  const chatId = String(chatIdValue || "").trim();
+  if (!token || !chatId || !topic?.topicId) return topic;
+  if (Number(topic.replyKeyboardMessageId) > 0 && Number(topic.replyKeyboardVersion) >= 4) return topic;
+
+  const payload = {
+    chat_id: chatId,
+    message_thread_id: Number(topic.topicId),
+    text: "点击下方“打开设置”查看静音和对话管理。",
+    reply_markup: {
+      keyboard: [[{ text: "打开设置" }]],
+      resize_keyboard: true,
+      one_time_keyboard: false,
+      is_persistent: false
+    }
+  };
+  let result;
+  try {
+    result = await callTelegramSettingsApi(token, "sendMessage", payload);
+  } catch (topicError) {
+    try {
+      const { message_thread_id: _ignoredThreadId, ...rootPayload } = payload;
+      result = await callTelegramSettingsApi(token, "sendMessage", rootPayload);
+    } catch (rootError) {
+      await chrome.storage.local.set({
+        [TELEGRAM_KEYS.lastError]: `Telegram 设置按钮发送失败：${String(rootError?.message || topicError?.message || rootError).slice(0, 240)}`
+      });
+      return topic;
+    }
+  }
+
+  const messageId = Number(result?.message_id) || 0;
+  if (!messageId) return topic;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.settingsTopics]: [] });
+  const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+  const updated = { ...topic, replyKeyboardMessageId: messageId, replyKeyboardVersion: 4 };
+  await chrome.storage.local.set({
+    [TELEGRAM_KEYS.settingsTopics]: settingsTopics.map((item) => item.id === topic.id ? updated : item)
+  });
+  return updated;
+}
+
+async function removeTelegramSettingsReplyKeyboard(tokenValue, chatIdValue, topic, messageThreadIdValue = 0) {
+  const token = String(tokenValue || "").trim();
+  const chatId = String(chatIdValue || "").trim();
+  if (!token || !chatId) return;
+  const threadId = String(messageThreadIdValue || topic?.topicId || "").trim();
+  const payload = {
+    chat_id: chatId,
+    text: "设置入口已移到聊天菜单。",
+    reply_markup: { remove_keyboard: true }
+  };
+  if (/^\d+$/.test(threadId)) payload.message_thread_id = Number(threadId);
+  try {
+    await callTelegramSettingsApi(token, "sendMessage", payload);
+  } catch (_error) {
+    delete payload.message_thread_id;
+    await callTelegramSettingsApi(token, "sendMessage", payload);
+  }
+
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.settingsTopics]: [] });
+  const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+  await chrome.storage.local.set({
+    [TELEGRAM_KEYS.settingsTopics]: settingsTopics.map((item) => String(item.chatId) === chatId
+      ? { ...item, replyKeyboardMessageId: 0, replyKeyboardVersion: 0 }
+      : item)
+  });
+}
+
+async function callTelegramSettingsApi(tokenValue, method, payload) {
+  const token = String(tokenValue || "").trim();
+  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json();
+  if (!response.ok || result?.ok !== true) {
+    throw new Error(result?.description || `Telegram ${method} 失败（HTTP ${response.status}）`);
+  }
+  return result.result;
+}
+
+async function answerTelegramCallbackQuery(token, callbackQueryId, text = "", showAlert = false) {
+  if (!callbackQueryId) return;
+  try {
+    await callTelegramSettingsApi(token, "answerCallbackQuery", {
+      callback_query_id: String(callbackQueryId),
+      ...(text ? { text: String(text).slice(0, 180) } : {}),
+      ...(showAlert ? { show_alert: true } : {})
+    });
+  } catch (_error) {
+    // A stale callback must not block newer Telegram updates.
+  }
+}
+
+async function processTelegramSettingsCallback(token, callback) {
+  const message = callback?.message;
+  const chatId = String(message?.chat?.id || "");
+  const topicId = String(message?.message_thread_id || "");
+  const callbackUserId = String(callback?.from?.id || "");
+  const data = String(callback?.data || "");
+  if (!message || !chatId || !topicId || callbackUserId !== chatId || !data.startsWith(TELEGRAM_SETTINGS_CALLBACK_PREFIX)) {
+    await answerTelegramCallbackQuery(token, callback?.id, "无效的设置操作", true);
+    return;
+  }
+
+  const stored = await chrome.storage.local.get({
+    [TELEGRAM_KEYS.settingsTopics]: [],
+    [TELEGRAM_KEYS.managedTopics]: [],
+    telegramSilentPushEnabled: false
+  });
+  const settingsTopics = Array.isArray(stored[TELEGRAM_KEYS.settingsTopics]) ? stored[TELEGRAM_KEYS.settingsTopics] : [];
+  const settingsTopic = settingsTopics.find((topic) => String(topic.chatId) === chatId && String(topic.topicId) === topicId);
+  if (!settingsTopic) {
+    await answerTelegramCallbackQuery(token, callback.id, "设置主题已失效，请重新发送 /start", true);
+    return;
+  }
+
+  const messageId = Number(message.message_id) || 0;
+  if (data === `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}mute`) {
+    const enabled = stored.telegramSilentPushEnabled !== true;
+    await chrome.storage.local.set({ telegramSilentPushEnabled: enabled });
+    await editTelegramSettingsMessage(token, settingsTopic, messageId, buildTelegramSettingsHomeScreen(enabled));
+    await answerTelegramCallbackQuery(token, callback.id, enabled ? "已开启静音通知" : "已关闭静音通知");
+    return;
+  }
+
+  if (data === `${TELEGRAM_SETTINGS_CALLBACK_PREFIX}home`) {
+    await editTelegramSettingsMessage(token, settingsTopic, messageId, buildTelegramSettingsHomeScreen(stored.telegramSilentPushEnabled === true));
+    await answerTelegramCallbackQuery(token, callback.id);
+    return;
+  }
+
+  const dialogsMatch = data.match(/^nsh:dialogs:(\d+)$/);
+  if (dialogsMatch) {
+    const topics = getTelegramSettingsDialogTopics(
+      chatId,
+      stored[TELEGRAM_KEYS.managedTopics],
+      stored[TELEGRAM_KEYS.settingsTopics]
+    );
+    const availableIds = new Set(topics.map((topic) => String(topic.id)));
+    const selectedIds = (Array.isArray(settingsTopic.selectedDialogIds) ? settingsTopic.selectedDialogIds : [])
+      .map(String).filter((id) => availableIds.has(id));
+    await editTelegramSettingsMessage(token, settingsTopic, messageId,
+      buildTelegramSettingsDialogsScreen(topics, dialogsMatch[1], selectedIds));
+    await answerTelegramCallbackQuery(token, callback.id);
+    return;
+  }
+
+  const dialogTopics = getTelegramSettingsDialogTopics(
+    chatId,
+    stored[TELEGRAM_KEYS.managedTopics],
+    stored[TELEGRAM_KEYS.settingsTopics]
+  );
+  const availableDialogIds = new Set(dialogTopics.map((topic) => String(topic.id)));
+  let selectedDialogIds = (Array.isArray(settingsTopic.selectedDialogIds) ? settingsTopic.selectedDialogIds : [])
+    .map(String).filter((id) => availableDialogIds.has(id));
+
+  const toggleMatch = data.match(/^nsh:toggle:([\w-]+):(\d+)$/)
+    || data.match(/^nsh:delete:([\w-]+)$/);
+  if (toggleMatch) {
+    const topic = dialogTopics.find((item) => String(item.id) === toggleMatch[1]);
+    if (!topic) {
+      await answerTelegramCallbackQuery(token, callback.id, "找不到这个对话", true);
+      return;
+    }
+    const selected = new Set(selectedDialogIds);
+    if (selected.has(String(topic.id))) selected.delete(String(topic.id));
+    else selected.add(String(topic.id));
+    selectedDialogIds = [...selected];
+    const page = Number(toggleMatch[2]) || 0;
+    await updateTelegramSettingsDialogSelection(chatId, topicId, selectedDialogIds);
+    await editTelegramSettingsMessage(token, settingsTopic, messageId,
+      buildTelegramSettingsDialogsScreen(dialogTopics, page, selectedDialogIds));
+    await answerTelegramCallbackQuery(token, callback.id);
+    return;
+  }
+
+  const selectAllMatch = data.match(/^nsh:select-all:(\d+)$/);
+  if (selectAllMatch) {
+    selectedDialogIds = dialogTopics.map((topic) => String(topic.id));
+    await updateTelegramSettingsDialogSelection(chatId, topicId, selectedDialogIds);
+    await editTelegramSettingsMessage(token, settingsTopic, messageId,
+      buildTelegramSettingsDialogsScreen(dialogTopics, selectAllMatch[1], selectedDialogIds));
+    await answerTelegramCallbackQuery(token, callback.id, `已选中 ${selectedDialogIds.length} 个对话`);
+    return;
+  }
+
+  const clearSelectionMatch = data.match(/^nsh:clear-selection:(\d+)$/);
+  if (clearSelectionMatch) {
+    selectedDialogIds = [];
+    await updateTelegramSettingsDialogSelection(chatId, topicId, selectedDialogIds);
+    await editTelegramSettingsMessage(token, settingsTopic, messageId,
+      buildTelegramSettingsDialogsScreen(dialogTopics, clearSelectionMatch[1], selectedDialogIds));
+    await answerTelegramCallbackQuery(token, callback.id, "已清空选择");
+    return;
+  }
+
+  const deleteSelectedMatch = data.match(/^nsh:delete-selected:(\d+)$/);
+  if (deleteSelectedMatch) {
+    const selectedTopics = dialogTopics.filter((topic) => selectedDialogIds.includes(String(topic.id)));
+    if (!selectedTopics.length) {
+      await answerTelegramCallbackQuery(token, callback.id, "请先勾选要删除的对话", true);
+      return;
+    }
+    await editTelegramSettingsMessage(token, settingsTopic, messageId,
+      buildTelegramSettingsDeleteConfirmScreen(selectedTopics, Number(deleteSelectedMatch[1]) || 0));
+    await answerTelegramCallbackQuery(token, callback.id);
+    return;
+  }
+
+  const confirmDeleteMatch = data.match(/^nsh:confirm-delete:(\d+)$/);
+  if (confirmDeleteMatch) {
+    const selectedTopics = dialogTopics.filter((topic) => selectedDialogIds.includes(String(topic.id)));
+    if (!selectedTopics.length) {
+      await answerTelegramCallbackQuery(token, callback.id, "没有可删除的已选对话", true);
+      return;
+    }
+    const result = await deleteTelegramManagedTopics(selectedTopics.map((topic) => topic.id));
+    const failedIds = result.failed.map((item) => String(item.id));
+    const settingsTopicDeleted = selectedTopics.some((topic) => String(topic.id) === String(settingsTopic.id))
+      && !failedIds.includes(String(settingsTopic.id));
+    if (settingsTopicDeleted) {
+      const status = result.failed.length
+        ? `已删除 ${result.deleted} 个；${result.failed.length} 个失败。`
+        : `已删除 ${result.deleted} 个对话。`;
+      await answerTelegramCallbackQuery(token, callback.id, `${status}设置主题已删除，发送 /start 可重新创建。`, result.failed.length > 0);
+      return;
+    }
+    await updateTelegramSettingsDialogSelection(chatId, topicId, failedIds);
+    const refreshed = await chrome.storage.local.get({
+      [TELEGRAM_KEYS.managedTopics]: [],
+      [TELEGRAM_KEYS.settingsTopics]: []
+    });
+    const remainingTopics = getTelegramSettingsDialogTopics(
+      chatId,
+      refreshed[TELEGRAM_KEYS.managedTopics],
+      refreshed[TELEGRAM_KEYS.settingsTopics]
+    );
+    const notice = result.failed.length
+      ? `已删除 ${result.deleted} 个，${result.failed.length} 个删除失败。`
+      : `已删除 ${result.deleted} 个对话。`;
+    await editTelegramSettingsMessage(token, settingsTopic, messageId,
+      buildTelegramSettingsDialogsScreen(remainingTopics, confirmDeleteMatch[1], failedIds, notice));
+    await answerTelegramCallbackQuery(token, callback.id, result.failed.length ? notice : "对话已删除");
+    return;
+  }
+
+  await answerTelegramCallbackQuery(token, callback.id, "不支持的设置操作", true);
 }
 
 async function processTelegramManagedTopicUpdates(token, updates) {
@@ -2277,7 +2959,7 @@ async function processTelegramManagedTopicUpdates(token, updates) {
           if (!queueItem.failureNotified) {
             const reason = String(error?.message || error || "图片上传失败").slice(0, 300);
             const failureMessage = error?.code === "TELEGRAM_IMAGE_UPLOAD_DISABLED"
-              ? "图片未发送到 NodeSeek：请在扩展设置的「图床配置」中开启图床上传，开启后插件会自动重试。"
+              ? "图片未发送到 NodeSeek：请在扩展设置的「图床配置」中开启图床上传，并登录 NodeImage 完成授权：https://www.nodeimage.com/。完成后插件会自动重试。"
               : `图片上传失败，插件会自动重试：${reason}`;
             await sendTelegramMessage(token, { type: "personal", chatId, topicId }, failureMessage);
             queueItem.failureNotified = true;
@@ -2564,13 +3246,16 @@ async function deleteTelegramManagedTopics(topicIdsValue) {
   if (selectedIds.size === 0) return { deleted: 0, failed: [] };
   const config = await chrome.storage.local.get({
     [TELEGRAM_KEYS.token]: "",
-    [TELEGRAM_KEYS.managedTopics]: []
+    [TELEGRAM_KEYS.managedTopics]: [],
+    [TELEGRAM_KEYS.settingsTopics]: []
   });
   const token = String(config[TELEGRAM_KEYS.token] || "").trim();
   if (!token) throw new Error("请先设置有效的 Bot Token");
-  const topics = Array.isArray(config[TELEGRAM_KEYS.managedTopics]) ? config[TELEGRAM_KEYS.managedTopics] : [];
+  const topics = [
+    ...(Array.isArray(config[TELEGRAM_KEYS.managedTopics]) ? config[TELEGRAM_KEYS.managedTopics] : []),
+    ...(Array.isArray(config[TELEGRAM_KEYS.settingsTopics]) ? config[TELEGRAM_KEYS.settingsTopics] : [])
+  ];
   const deleting = topics.filter((topic) => selectedIds.has(String(topic.id)));
-  const retained = topics.filter((topic) => !selectedIds.has(String(topic.id)));
   const failed = [];
   let deleted = 0;
 
@@ -2583,13 +3268,20 @@ async function deleteTelegramManagedTopics(topicIdsValue) {
     const result = await response.json();
     if (!response.ok || !result?.ok) {
       failed.push({ id: topic.id, name: topic.name, error: result?.description || `HTTP ${response.status}` });
-      retained.push(topic);
       continue;
     }
     deleted += 1;
   }
 
-  await chrome.storage.local.set({ [TELEGRAM_KEYS.managedTopics]: retained });
+  const failedIds = new Set(failed.map((topic) => String(topic.id)));
+  const managedTopics = Array.isArray(config[TELEGRAM_KEYS.managedTopics]) ? config[TELEGRAM_KEYS.managedTopics] : [];
+  const settingsTopics = Array.isArray(config[TELEGRAM_KEYS.settingsTopics]) ? config[TELEGRAM_KEYS.settingsTopics] : [];
+  await chrome.storage.local.set({
+    [TELEGRAM_KEYS.managedTopics]: managedTopics.filter((topic) =>
+      !selectedIds.has(String(topic.id)) || failedIds.has(String(topic.id))),
+    [TELEGRAM_KEYS.settingsTopics]: settingsTopics.filter((topic) =>
+      !selectedIds.has(String(topic.id)) || failedIds.has(String(topic.id)))
+  });
   return { deleted, failed };
 }
 
@@ -2784,10 +3476,11 @@ async function registerTelegramPersonalStartUpdate(token, update) {
 
   if (updateId <= lastRepliedUpdateId) return;
   try {
-    const reply = targetAdded
-      ? existingTarget ? "这个聊天已在插件的推送目标中。" : "设置成功，请返回插件查看"
-      : "推送目标已满，请返回插件移除一个目标后重试。";
-    await sendTelegramMessage(token, { type: "personal", chatId }, reply);
+    if (targetAdded) {
+      await ensureTelegramSettingsEntry(token, chatId);
+    } else {
+      await sendTelegramMessage(token, { type: "personal", chatId }, "推送目标已满，请返回插件移除一个目标后重试。");
+    }
     await chrome.storage.local.set({ [TELEGRAM_PERSONAL_START_REPLIED_UPDATE_ID_KEY]: updateId });
   } catch (error) {
     chrome.runtime.sendMessage({
@@ -2914,6 +3607,23 @@ function addTelegramTargetTopic(payload, target) {
   return payload;
 }
 
+async function shouldSendTelegramSilently() {
+  try {
+    const settings = await chrome.storage.local.get({ telegramSilentPushEnabled: false });
+    if (settings.telegramSilentPushEnabled === true) return true;
+    const window = await chrome.windows.getLastFocused({
+      windowTypes: ["normal"]
+    });
+    if (!window?.focused) return false;
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: window.id });
+    const url = new URL(String(activeTab?.url || ""));
+    return url.protocol === "https:"
+      && (url.hostname === "nodeseek.com" || url.hostname.endsWith(".nodeseek.com"));
+  } catch (_error) {
+    return false;
+  }
+}
+
 async function sendTelegramPhoto(tokenValue, target, photoUrl, caption = "") {
   const token = String(tokenValue || "").trim();
   const url = String(photoUrl || "").trim();
@@ -2922,6 +3632,7 @@ async function sendTelegramPhoto(tokenValue, target, photoUrl, caption = "") {
   const payload = addTelegramTargetTopic({
     chat_id: target.chatId,
     photo: url,
+    disable_notification: await shouldSendTelegramSilently(),
     ...(caption ? { caption: String(caption).slice(0, 1024) } : {})
   }, target);
   const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/sendPhoto`, {
@@ -2946,6 +3657,7 @@ async function sendTelegramMessage(tokenValue, target, text, entities = null) {
     chat_id: target.chatId,
     text: String(text || "").slice(0, 4000),
     disable_web_page_preview: true,
+    disable_notification: await shouldSendTelegramSilently(),
     ...(Array.isArray(entities) && entities.length ? { entities } : {})
   }, target);
   const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/sendMessage`, {
