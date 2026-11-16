@@ -804,12 +804,6 @@ form {
   border-top: 1px solid var(--telegram-panel-color);
 }
 
-.telegram-monitor-heading {
-  color: var(--telegram-panel-color);
-  font-size: 13px;
-  font-weight: 600;
-}
-
 .telegram-notification-toggles .quick-page-option {
   min-width: 0;
   gap: 6px;
