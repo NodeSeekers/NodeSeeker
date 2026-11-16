@@ -4,6 +4,17 @@ scheduleProfileRetentionPrune();
 scheduleTelegramMonitorAlarm();
 scheduleAutoAttendanceAlarm();
 
+function scheduleTelegramMonitorForLifecycle({ checkImmediately = false } = {}) {
+  return chrome.storage.local.get({ telegramOfflineMessageSyncEnabled: true })
+    .then((config) => scheduleTelegramMonitorAlarm({
+      resetMessageBaseline: config.telegramOfflineMessageSyncEnabled === false,
+      checkImmediately
+    }))
+    .catch((error) => {
+      console.warn("Telegram lifecycle check setup failed:", error?.message || "unknown error");
+    });
+}
+
 chrome.runtime.onInstalled.addListener((details) => {
   importPreloadedConfiguration()
     .catch((error) => {
@@ -13,7 +24,7 @@ chrome.runtime.onInstalled.addListener((details) => {
       discardLegacyStorage();
       scheduleLuckyNotificationAlarmSync();
       scheduleProfileRetentionPrune();
-      scheduleTelegramMonitorAlarm({ checkImmediately: details?.reason === "update" });
+      scheduleTelegramMonitorForLifecycle({ checkImmediately: details?.reason === "update" });
       scheduleAutoAttendanceAlarm();
     });
 });
@@ -21,7 +32,7 @@ chrome.runtime.onStartup.addListener(() => {
   discardLegacyStorage();
   scheduleLuckyNotificationAlarmSync();
   scheduleProfileRetentionPrune();
-  scheduleTelegramMonitorAlarm();
+  scheduleTelegramMonitorForLifecycle({ checkImmediately: true });
   scheduleAutoAttendanceAlarm();
 });
 

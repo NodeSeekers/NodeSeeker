@@ -10,6 +10,8 @@ const TELEGRAM_KEYS = {
   boards: "telegramBoardSlugs",
   messageCursors: "telegramMessageCursors",
   outgoingMessageEchoes: "telegramOutgoingMessageEchoes",
+  outgoingReadStatuses: "telegramOutgoingMessageReadStatuses",
+  topicReadMarkerIconId: "telegramTopicUnreadDistortedFaceIconCustomEmojiId",
   systemNotificationUserId: "telegramSystemNotificationUserId",
   managedTopics: "telegramManagedTopics",
   processedTopicUpdates: "telegramProcessedTopicUpdateIds",
@@ -31,6 +33,7 @@ const TELEGRAM_ACTIVITY_PAGE_LIMIT = 20;
 const TELEGRAM_ACTIVITY_PAGE_SIZE = 10;
 const TELEGRAM_OUTGOING_ECHO_LIMIT = 200;
 const TELEGRAM_OUTGOING_ECHO_TTL_MS = 2 * 60 * 60 * 1000;
+const TELEGRAM_TOPIC_UNREAD_MARKER_TYPE = "topic-icon-eyes";
 const TELEGRAM_TOPIC_STYLES = Object.freeze({
   system: Object.freeze({ name: "系统", iconCustomEmojiId: "5309984423003823246", iconColor: 16766590 }),
   rss: Object.freeze({ name: "监控", iconCustomEmojiId: "5309965701241379366", iconColor: 9367192 }),
@@ -38,11 +41,81 @@ const TELEGRAM_TOPIC_STYLES = Object.freeze({
   reply: Object.freeze({ name: "回复", iconCustomEmojiId: "5417915203100613993", iconColor: 13338331 }),
   dm: Object.freeze({ name: "", iconColor: 7322096 })
 });
-const TELEGRAM_DM_TOPIC_ANIMAL_ICONS = Object.freeze([
-  Object.freeze({ emoji: "🐈", customEmojiId: "5235912661102773458" }),
-  Object.freeze({ emoji: "🦮", customEmojiId: "5237999392438371490" }),
+const TELEGRAM_DM_TOPIC_ICONS = Object.freeze([
+  Object.freeze({ emoji: "🔥", customEmojiId: "5312241539987020022" }),
+  Object.freeze({ emoji: "💎", customEmojiId: "5309958691854754293" }),
+  Object.freeze({ emoji: "💰", customEmojiId: "5350452584119279096" }),
+  Object.freeze({ emoji: "💸", customEmojiId: "5309929258443874898" }),
+  Object.freeze({ emoji: "🪙", customEmojiId: "5377690785674175481" }),
+  Object.freeze({ emoji: "🎮", customEmojiId: "5309950797704865693" }),
+  Object.freeze({ emoji: "💻", customEmojiId: "5350554349074391003" }),
+  Object.freeze({ emoji: "🚗", customEmojiId: "5312322066328853156" }),
+  Object.freeze({ emoji: "🏠", customEmojiId: "5312486108309757006" }),
+  Object.freeze({ emoji: "💘", customEmojiId: "5310029292527164639" }),
+  Object.freeze({ emoji: "🎉", customEmojiId: "5310228579009699834" }),
+  Object.freeze({ emoji: "‼️", customEmojiId: "5377498341074542641" }),
+  Object.freeze({ emoji: "🏆", customEmojiId: "5312315739842026755" }),
+  Object.freeze({ emoji: "🔞", customEmojiId: "5420331611830886484" }),
+  Object.freeze({ emoji: "📚", customEmojiId: "5350481781306958339" }),
+  Object.freeze({ emoji: "👑", customEmojiId: "5357107601584693888" }),
+  Object.freeze({ emoji: "⚽️", customEmojiId: "5375159220280762629" }),
+  Object.freeze({ emoji: "🏀", customEmojiId: "5384327463629233871" }),
+  Object.freeze({ emoji: "📺", customEmojiId: "5350513667144163474" }),
+  Object.freeze({ emoji: "🍓", customEmojiId: "5310157398516703416" }),
+  Object.freeze({ emoji: "🧳", customEmojiId: "5357120306097956843" }),
+  Object.freeze({ emoji: "🏖", customEmojiId: "5310303848311562896" }),
+  Object.freeze({ emoji: "⛅️", customEmojiId: "5350424168615649565" }),
+  Object.freeze({ emoji: "🦄", customEmojiId: "5413625003218313783" }),
+  Object.freeze({ emoji: "🚂", customEmojiId: "5350497316203668441" }),
+  Object.freeze({ emoji: "🛥", customEmojiId: "5350422527938141909" }),
+  Object.freeze({ emoji: "🏔", customEmojiId: "5418196338774907917" }),
+  Object.freeze({ emoji: "🏕", customEmojiId: "5350648297189023928" }),
+  Object.freeze({ emoji: "🤖", customEmojiId: "5309832892262654231" }),
+  Object.freeze({ emoji: "🪩", customEmojiId: "5350751634102166060" }),
+  Object.freeze({ emoji: "🎟", customEmojiId: "5377624166436445368" }),
+  Object.freeze({ emoji: "🏴‍☠️", customEmojiId: "5386395194029515402" }),
+  Object.freeze({ emoji: "🗳", customEmojiId: "5350387571199319521" }),
+  Object.freeze({ emoji: "🎓", customEmojiId: "5357419403325481346" }),
+  Object.freeze({ emoji: "🔭", customEmojiId: "5368585403467048206" }),
+  Object.freeze({ emoji: "🔬", customEmojiId: "5377580546748588392" }),
+  Object.freeze({ emoji: "🎶", customEmojiId: "5377317729109811382" }),
+  Object.freeze({ emoji: "🕺", customEmojiId: "5357298525765902091" }),
+  Object.freeze({ emoji: "💃", customEmojiId: "5357370526597653193" }),
+  Object.freeze({ emoji: "🪖", customEmojiId: "5357188789351490453" }),
+  Object.freeze({ emoji: "💼", customEmojiId: "5348227245599105972" }),
+  Object.freeze({ emoji: "👨‍👩‍👧‍👦", customEmojiId: "5386435923204382258" }),
+  Object.freeze({ emoji: "👶", customEmojiId: "5377675010259297233" }),
+  Object.freeze({ emoji: "🤰", customEmojiId: "5386609083400856174" }),
+  Object.freeze({ emoji: "💅", customEmojiId: "5368808634392257474" }),
+  Object.freeze({ emoji: "🏛", customEmojiId: "5350548830041415279" }),
+  Object.freeze({ emoji: "👮‍♂️", customEmojiId: "5377494501373780436" }),
+  Object.freeze({ emoji: "💊", customEmojiId: "5310094636159607472" }),
+  Object.freeze({ emoji: "💉", customEmojiId: "5310139157790596888" }),
+  Object.freeze({ emoji: "🧼", customEmojiId: "5377468357907849200" }),
+  Object.freeze({ emoji: "🪪", customEmojiId: "5418115271267197333" }),
+  Object.freeze({ emoji: "🛃", customEmojiId: "5372819184658949787" }),
+  Object.freeze({ emoji: "🍽", customEmojiId: "5350344462612570293" }),
   Object.freeze({ emoji: "🐟", customEmojiId: "5384574037701696503" }),
-  Object.freeze({ emoji: "🦄", customEmojiId: "5413625003218313783" })
+  Object.freeze({ emoji: "🎨", customEmojiId: "5310039132297242441" }),
+  Object.freeze({ emoji: "🎭", customEmojiId: "5350658016700013471" }),
+  Object.freeze({ emoji: "🎩", customEmojiId: "5357504778685392027" }),
+  Object.freeze({ emoji: "🔮", customEmojiId: "5350367161514732241" }),
+  Object.freeze({ emoji: "🍹", customEmojiId: "5350520238444126134" }),
+  Object.freeze({ emoji: "🎂", customEmojiId: "5310132165583840589" }),
+  Object.freeze({ emoji: "☕️", customEmojiId: "5350392020785437399" }),
+  Object.freeze({ emoji: "🍣", customEmojiId: "5350406176997646350" }),
+  Object.freeze({ emoji: "🍔", customEmojiId: "5350403544182694064" }),
+  Object.freeze({ emoji: "🍕", customEmojiId: "5350444672789519765" }),
+  Object.freeze({ emoji: "🦠", customEmojiId: "5312424913615723286" }),
+  Object.freeze({ emoji: "🎄", customEmojiId: "5312054580060625569" }),
+  Object.freeze({ emoji: "🎃", customEmojiId: "5309744892677727325" }),
+  Object.freeze({ emoji: "✍️", customEmojiId: "5238156910363950406" }),
+  Object.freeze({ emoji: "⭐️", customEmojiId: "5235579393115438657" }),
+  Object.freeze({ emoji: "🎖", customEmojiId: "5238027455754680851" }),
+  Object.freeze({ emoji: "🤡", customEmojiId: "5238234236955148254" }),
+  Object.freeze({ emoji: "🧠", customEmojiId: "5237889595894414384" }),
+  Object.freeze({ emoji: "🦮", customEmojiId: "5237999392438371490" }),
+  Object.freeze({ emoji: "🐈", customEmojiId: "5235912661102773458" })
 ]);
 const TELEGRAM_MONITOR_INTERVAL_SECONDS = Object.freeze([10, 30, 60, 300, 900]);
 const TELEGRAM_RSS_INTERVAL_SECONDS = Object.freeze([30, 60, 300, 900]);
@@ -117,6 +190,8 @@ async function scheduleTelegramMonitorAlarm(
     [TELEGRAM_KEYS.mentionEnabled]: null,
     [TELEGRAM_KEYS.replyEnabled]: null,
     [TELEGRAM_KEYS.managedTopics]: [],
+    [TELEGRAM_KEYS.outgoingMessageEchoes]: [],
+    [TELEGRAM_KEYS.outgoingReadStatuses]: {},
     telegramMentionReplyNotificationsEnabled: null,
     telegramMonitorIntervalSeconds: 30,
     [TELEGRAM_RSS_INTERVAL_KEY]: null,
@@ -257,7 +332,20 @@ function isTelegramNodeSeekMonitorReady(config) {
   return isTelegramMonitorReady(config)
     && (config[TELEGRAM_KEYS.messagesEnabled]
       || config[TELEGRAM_KEYS.mentionEnabled]
-      || config[TELEGRAM_KEYS.replyEnabled]);
+      || config[TELEGRAM_KEYS.replyEnabled]
+      || hasPendingTelegramOutgoingReadTracking(config));
+}
+
+function hasPendingTelegramOutgoingReadTracking(config) {
+  const echoes = Array.isArray(config[TELEGRAM_KEYS.outgoingMessageEchoes])
+    ? config[TELEGRAM_KEYS.outgoingMessageEchoes] : [];
+  const statuses = config[TELEGRAM_KEYS.outgoingReadStatuses]
+    && typeof config[TELEGRAM_KEYS.outgoingReadStatuses] === "object"
+    ? Object.values(config[TELEGRAM_KEYS.outgoingReadStatuses]) : [];
+  const now = Date.now();
+  return echoes.some((echo) => echo?.userId && echo?.originChatId && echo?.originTopicId
+      && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS)
+    || statuses.some((status) => status?.userId && status?.messageId);
 }
 
 function isTelegramRssMonitorReady(config) {
@@ -407,6 +495,8 @@ async function checkTelegramNotifications() {
       [TELEGRAM_KEYS.blockedKeywords]: [],
       [TELEGRAM_KEYS.boards]: [],
       [TELEGRAM_KEYS.messageCursors]: null,
+      [TELEGRAM_KEYS.outgoingMessageEchoes]: [],
+      [TELEGRAM_KEYS.outgoingReadStatuses]: {},
       [TELEGRAM_KEYS.mentionReplyCursors]: {},
       [TELEGRAM_KEYS.paused]: false
     });
@@ -415,12 +505,21 @@ async function checkTelegramNotifications() {
     if (!config[TELEGRAM_KEYS.token].trim() || config[TELEGRAM_KEYS.paused] || !hasEnabledTarget) return;
 
     const errors = [];
-    if (config[TELEGRAM_KEYS.messagesEnabled]) {
+    const hasPendingReadTracking = hasPendingTelegramOutgoingReadTracking(config);
+    if (config[TELEGRAM_KEYS.messagesEnabled] || hasPendingReadTracking) {
       try {
-        await checkForNewNodeSeekMessages(config);
+        await checkForNewNodeSeekMessages(config, {
+          allowUnmatchedOutgoing: config[TELEGRAM_KEYS.messagesEnabled] === true,
+          allowIncoming: config[TELEGRAM_KEYS.messagesEnabled] === true
+        });
       } catch (error) {
         errors.push(`私信：${error?.message || "检查失败"}`);
       }
+    }
+    if (hasPendingReadTracking) {
+      await checkPendingTelegramOutgoingEchoes();
+      const resolvedReadStatuses = await checkPendingTelegramOutgoingReadStatuses(config[TELEGRAM_KEYS.token]);
+      if (resolvedReadStatuses) await scheduleTelegramMonitorAlarm();
     }
     for (const [kind, enabled] of [
       ["at", config[TELEGRAM_KEYS.mentionEnabled]],
@@ -476,7 +575,10 @@ async function checkTelegramRssNotifications() {
   }
 }
 
-async function checkForNewNodeSeekMessages(config) {
+async function checkForNewNodeSeekMessages(config, {
+  allowUnmatchedOutgoing = true,
+  allowIncoming = true
+} = {}) {
   const response = await fetch("https://www.nodeseek.com/api/notification/message/list", {
     credentials: "include",
     headers: { Accept: "application/json" }
@@ -559,13 +661,33 @@ async function checkForNewNodeSeekMessages(config) {
       .find((topic) => (topic.kind === "dm" && String(topic.nsUserId) === peerId)
         || (peerId === systemNotificationUserId && topic.kind === "system"));
 
+    let waitingForTelegramSend = false;
     for (const incomingMessage of newMessages) {
       const senderId = String(incomingMessage.sender_id || "").trim();
       const receiverId = String(incomingMessage.receiver_id || "").trim();
       const isOutgoing = senderId === currentUserId && receiverId === peerId;
       const isIncoming = senderId === peerId && receiverId === currentUserId;
       if (isOutgoing || isIncoming) {
-        if (isOutgoing && await consumeTelegramOutgoingEcho(peerId, incomingMessage.content)) {
+        if (isOutgoing) {
+          const echoMatch = await consumeTelegramOutgoingEcho(peerId, incomingMessage.content, incomingMessage.id);
+          if (echoMatch?.pending) {
+            waitingForTelegramSend = true;
+            break;
+          }
+          if (echoMatch?.record) {
+            await recordTelegramOutgoingReadStatus(config[TELEGRAM_KEYS.token], echoMatch.record, incomingMessage)
+              .catch(() => {});
+            nextCursors[conversationId] = String(incomingMessage.id);
+            await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
+            continue;
+          }
+          if (!allowUnmatchedOutgoing) {
+            nextCursors[conversationId] = String(incomingMessage.id);
+            await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
+            continue;
+          }
+        }
+        if (isIncoming && !allowIncoming) {
           nextCursors[conversationId] = String(incomingMessage.id);
           await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
           continue;
@@ -593,7 +715,7 @@ async function checkForNewNodeSeekMessages(config) {
           ? ["NodeSeek 私信", "发送者：我", `对话：${peerName}`, ...(body ? ["", body] : [])].join("\n")
           : ["NodeSeek 新私信", `发件人：${peerName}`, ...(body ? ["", body] : [])].join("\n");
         const topicText = isOutgoing && body ? `我：${body}` : body;
-        await sendTelegramPrivateMessageToTopics(
+        const deliveredTopics = await sendTelegramPrivateMessageToTopics(
           config,
           peerId,
           peerName,
@@ -603,11 +725,23 @@ async function checkForNewNodeSeekMessages(config) {
           messageContent.imageUrls,
           { includeDirectTargets: !isOutgoing }
         );
+        if (isOutgoing && !isSystemNotification) {
+          for (const topic of deliveredTopics) {
+            await recordTelegramOutgoingReadStatus(config[TELEGRAM_KEYS.token], {
+              userId: peerId,
+              originChatId: topic.chatId,
+              originTopicId: topic.topicId,
+              originTopicName: topic.name
+            }, incomingMessage).catch(() => {});
+          }
+        }
       }
 
       nextCursors[conversationId] = String(incomingMessage.id);
       await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
     }
+
+    if (waitingForTelegramSend) continue;
 
     nextCursors[conversationId] = latestMessageId;
     changed = true;
@@ -939,26 +1073,64 @@ async function getTelegramOutgoingEchoFingerprint(userIdValue, contentValue) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function rememberTelegramOutgoingEcho(userIdValue, contentValue) {
-  try {
-    const userId = String(userIdValue || "").trim();
-    const fingerprint = await getTelegramOutgoingEchoFingerprint(userId, contentValue);
-    const now = Date.now();
-    const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingMessageEchoes]: [] });
-    const echoes = (Array.isArray(stored[TELEGRAM_KEYS.outgoingMessageEchoes])
-      ? stored[TELEGRAM_KEYS.outgoingMessageEchoes] : [])
-      .filter((echo) => echo?.userId && echo?.fingerprint
-        && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS);
-    echoes.push({ userId, fingerprint, createdAt: now });
-    await chrome.storage.local.set({
-      [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes.slice(-TELEGRAM_OUTGOING_ECHO_LIMIT)
-    });
-  } catch (_error) {
-    // Do not retry a successfully sent private reply if echo bookkeeping fails.
-  }
+async function rememberTelegramOutgoingEcho(userIdValue, contentValue, origin = {}) {
+  const userId = String(userIdValue || "").trim();
+  const originChatId = String(origin.chatId || "").trim();
+  const originTopicId = String(origin.topicId || "").trim();
+  const originTopicName = stripTelegramTopicUnreadPrefix(origin.topicName || "");
+  const fingerprint = await getTelegramOutgoingEchoFingerprint(userId, contentValue);
+  const now = Date.now();
+  const cursorState = await chrome.storage.local.get({ [TELEGRAM_KEYS.messageCursors]: {} });
+  const conversationCursor = Object.entries(cursorState[TELEGRAM_KEYS.messageCursors] || {})
+    .find(([conversationId]) => conversationId.split(":").includes(userId))?.[1];
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingMessageEchoes]: [] });
+  const echoes = (Array.isArray(stored[TELEGRAM_KEYS.outgoingMessageEchoes])
+    ? stored[TELEGRAM_KEYS.outgoingMessageEchoes] : [])
+    .filter((echo) => echo?.userId && echo?.fingerprint
+      && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS);
+  const id = crypto.randomUUID();
+  echoes.push({
+    id,
+    userId,
+    fingerprint,
+    originChatId,
+    originTopicId,
+    originTopicName,
+    baselineMessageId: conversationCursor == null ? "" : String(conversationCursor),
+    status: "sending",
+    createdAt: now
+  });
+  await chrome.storage.local.set({
+    [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes.slice(-TELEGRAM_OUTGOING_ECHO_LIMIT)
+  });
+  return id;
 }
 
-async function consumeTelegramOutgoingEcho(userIdValue, contentValue) {
+async function updateTelegramOutgoingEchoStatus(echoIdValue, status) {
+  const echoId = String(echoIdValue || "");
+  if (!echoId) return;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingMessageEchoes]: [] });
+  const echoes = Array.isArray(stored[TELEGRAM_KEYS.outgoingMessageEchoes])
+    ? stored[TELEGRAM_KEYS.outgoingMessageEchoes] : [];
+  await chrome.storage.local.set({
+    [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes.map((echo) => echo.id === echoId
+      ? { ...echo, status }
+      : echo)
+  });
+}
+
+async function discardTelegramOutgoingEcho(echoIdValue) {
+  const echoId = String(echoIdValue || "");
+  if (!echoId) return;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingMessageEchoes]: [] });
+  const echoes = Array.isArray(stored[TELEGRAM_KEYS.outgoingMessageEchoes])
+    ? stored[TELEGRAM_KEYS.outgoingMessageEchoes] : [];
+  await chrome.storage.local.set({
+    [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes.filter((echo) => echo.id !== echoId)
+  });
+}
+
+async function consumeTelegramOutgoingEcho(userIdValue, contentValue, messageIdValue = null) {
   try {
     const userId = String(userIdValue || "").trim();
     const fingerprint = await getTelegramOutgoingEchoFingerprint(userId, contentValue);
@@ -968,18 +1140,28 @@ async function consumeTelegramOutgoingEcho(userIdValue, contentValue) {
       ? stored[TELEGRAM_KEYS.outgoingMessageEchoes] : [];
     const echoes = previousEchoes.filter((echo) => echo?.userId && echo?.fingerprint
       && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS);
-    const matchIndex = echoes.findIndex((echo) => echo.userId === userId && echo.fingerprint === fingerprint);
+    const hasMessageId = messageIdValue !== null && messageIdValue !== undefined
+      && Number.isFinite(Number(messageIdValue));
+    const messageId = Number(messageIdValue);
+    const matchIndex = echoes.findIndex((echo) => {
+      if (echo.userId !== userId || echo.fingerprint !== fingerprint) return false;
+      const hasBaseline = echo.baselineMessageId !== "" && echo.baselineMessageId != null
+        && Number.isFinite(Number(echo.baselineMessageId));
+      return !hasMessageId || !hasBaseline || messageId > Number(echo.baselineMessageId);
+    });
     if (matchIndex < 0) {
       if (echoes.length !== previousEchoes.length) {
         await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes });
       }
-      return false;
+      return null;
     }
+    const match = echoes[matchIndex];
+    if (match.status === "sending") return { pending: true };
     echoes.splice(matchIndex, 1);
     await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes });
-    return true;
+    return { record: match };
   } catch (_error) {
-    return false;
+    return null;
   }
 }
 
@@ -987,7 +1169,7 @@ async function fetchNodeSeekConversationMessages(userIdValue) {
   const userId = String(userIdValue || "").trim();
   const response = await fetch(
     `https://www.nodeseek.com/api/notification/message/with/${encodeURIComponent(userId)}`,
-    { credentials: "include", headers: { Accept: "application/json" } }
+    { credentials: "include", cache: "no-store", headers: { Accept: "application/json" } }
   );
   const conversation = await response.json();
   if (!response.ok || conversation?.success !== true || !Array.isArray(conversation.msgArray)) {
@@ -998,6 +1180,234 @@ async function fetchNodeSeekConversationMessages(userIdValue) {
 
 function isUnviewedMessage(message) {
   return message?.viewed === false || message?.viewed === 0 || String(message?.viewed) === "0";
+}
+
+function isViewedMessage(message) {
+  return message?.viewed === true || message?.viewed === 1 || String(message?.viewed) === "1";
+}
+
+function getTelegramTopicReadStatusKey(chatIdValue, topicIdValue) {
+  return `${String(chatIdValue || "").trim()}:${String(topicIdValue || "").trim()}`;
+}
+
+function stripTelegramTopicUnreadPrefix(nameValue) {
+  return String(nameValue || "").replace(/^📬\s*/, "").trim();
+}
+
+async function editTelegramTopicReadMarker(tokenValue, status, unread) {
+  const token = String(tokenValue || "").trim();
+  const chatId = String(status?.chatId || "").trim();
+  const topicId = String(status?.topicId || "").trim();
+  const baseName = stripTelegramTopicUnreadPrefix(status?.topicName);
+  if (!token || !chatId || !/^\d+$/.test(topicId) || !baseName) return false;
+
+  const storedTopics = await chrome.storage.local.get({ [TELEGRAM_KEYS.managedTopics]: [] });
+  const topic = (Array.isArray(storedTopics[TELEGRAM_KEYS.managedTopics])
+    ? storedTopics[TELEGRAM_KEYS.managedTopics] : [])
+    .find((item) => String(item.chatId) === chatId && String(item.topicId) === topicId);
+  const originalIconId = String(status.topicIconBeforeMarker || topic?.iconCustomEmojiId || "");
+  if (!originalIconId) return false;
+  const iconId = unread
+    ? await getTelegramTopicUnreadIconCustomEmojiId(token)
+    : originalIconId;
+  if (!iconId) return false;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/editForumTopic`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_thread_id: Number(topicId),
+        name: baseName,
+        icon_custom_emoji_id: iconId
+      })
+    });
+    const result = await response.json();
+    return response.ok && result?.ok === true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function getTelegramTopicUnreadIconCustomEmojiId(tokenValue) {
+  const token = String(tokenValue || "").trim();
+  if (!token) return "";
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.topicReadMarkerIconId]: "" });
+  if (stored[TELEGRAM_KEYS.topicReadMarkerIconId]) {
+    return String(stored[TELEGRAM_KEYS.topicReadMarkerIconId]);
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/getForumTopicIconStickers`);
+    const result = await response.json();
+    if (!response.ok || result?.ok !== true || !Array.isArray(result.result)) return "";
+    const normalizeEmoji = (value) => String(value || "").replace(/\uFE0F/g, "");
+    const preferredEmojis = ["👀"];
+    for (const emoji of preferredEmojis) {
+      const sticker = result.result.find((item) => normalizeEmoji(item?.emoji) === normalizeEmoji(emoji)
+        && item?.custom_emoji_id);
+      if (!sticker) continue;
+      const iconId = String(sticker.custom_emoji_id);
+      await chrome.storage.local.set({ [TELEGRAM_KEYS.topicReadMarkerIconId]: iconId });
+      return iconId;
+    }
+  } catch (_error) {
+    // Keep the topic unchanged when Telegram cannot provide an allowed icon.
+  }
+  return "";
+}
+
+async function recordTelegramOutgoingReadStatus(token, echo, message) {
+  const chatId = String(echo?.originChatId || "").trim();
+  const topicId = String(echo?.originTopicId || "").trim();
+  const userId = String(echo?.userId || "").trim();
+  if (!chatId || !topicId || !userId || message?.id == null) return;
+
+  const key = getTelegramTopicReadStatusKey(chatId, topicId);
+  const [statusState, topicState] = await Promise.all([
+    chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingReadStatuses]: {} }),
+    chrome.storage.local.get({ [TELEGRAM_KEYS.managedTopics]: [] })
+  ]);
+  const statuses = { ...(statusState[TELEGRAM_KEYS.outgoingReadStatuses] || {}) };
+  const previous = statuses[key];
+  const topic = (Array.isArray(topicState[TELEGRAM_KEYS.managedTopics])
+    ? topicState[TELEGRAM_KEYS.managedTopics] : [])
+    .find((item) => item.kind === "dm"
+      && String(item.chatId) === chatId
+      && String(item.topicId) === topicId
+      && String(item.nsUserId) === userId);
+  const topicName = stripTelegramTopicUnreadPrefix(previous?.topicName || topic?.name || echo?.originTopicName || "");
+  if (!topicName) return;
+
+  const status = {
+    chatId,
+    topicId,
+    userId,
+    messageId: String(message.id),
+    topicName,
+    topicIconBeforeMarker: String(previous?.topicIconBeforeMarker || topic?.iconCustomEmojiId || ""),
+    readState: isViewedMessage(message) ? "read" : isUnviewedMessage(message) ? "unread" : "unknown",
+    markerType: previous?.messageId === String(message.id) ? previous?.markerType || "" : "",
+    markerApplied: previous?.messageId === String(message.id) && previous?.markerApplied === true,
+    updatedAt: Date.now()
+  };
+  statuses[key] = status;
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingReadStatuses]: statuses });
+
+  if (status.readState === "read") {
+    if (!previous) {
+      delete statuses[key];
+      await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingReadStatuses]: statuses });
+      return;
+    }
+    const restored = await editTelegramTopicReadMarker(token, status, false);
+    if (restored) {
+      delete statuses[key];
+      await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingReadStatuses]: statuses });
+    }
+  } else if (status.readState === "unread"
+      && (status.markerType !== TELEGRAM_TOPIC_UNREAD_MARKER_TYPE || !status.markerApplied)) {
+    const marked = await editTelegramTopicReadMarker(token, status, true);
+    if (marked) {
+      statuses[key] = {
+        ...status,
+        markerType: TELEGRAM_TOPIC_UNREAD_MARKER_TYPE,
+        markerApplied: true
+      };
+      await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingReadStatuses]: statuses });
+    }
+  }
+}
+
+async function checkPendingTelegramOutgoingEchoes(tokenValue) {
+  const token = String(tokenValue || "").trim();
+  if (!token) return;
+  const [echoState, currentUser] = await Promise.all([
+    chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingMessageEchoes]: [] }),
+    fetchLuckyCurrentUser("https://www.nodeseek.com/").catch(() => null)
+  ]);
+  const currentUserId = String(currentUser?.member_id || "").trim();
+  if (!currentUserId) return;
+
+  const now = Date.now();
+  const echoes = Array.isArray(echoState[TELEGRAM_KEYS.outgoingMessageEchoes])
+    ? echoState[TELEGRAM_KEYS.outgoingMessageEchoes] : [];
+  const pending = echoes.filter((echo) => echo?.status === "sent"
+    && echo?.originChatId && echo?.originTopicId && echo?.userId
+    && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS
+    && echo.baselineMessageId !== "");
+  const userIds = [...new Set(pending.map((echo) => String(echo.userId)))];
+
+  for (const userId of userIds) {
+    let conversation;
+    try {
+      conversation = await fetchNodeSeekConversationMessages(userId);
+    } catch (_error) {
+      continue;
+    }
+    const outgoingMessages = conversation.msgArray
+      .filter((message) => String(message?.sender_id || "") === currentUserId
+        && String(message?.receiver_id || "") === userId)
+      .sort((a, b) => Number(a.id) - Number(b.id));
+    for (const message of outgoingMessages) {
+      const candidates = pending.filter((echo) => String(echo.userId) === userId
+        && Number(message.id) > Number(echo.baselineMessageId || 0));
+      if (candidates.length === 0) continue;
+      const matched = await consumeTelegramOutgoingEcho(userId, message.content, message.id);
+      if (matched?.record) {
+        await recordTelegramOutgoingReadStatus(token, matched.record, message).catch(() => {});
+      }
+    }
+  }
+}
+
+async function checkPendingTelegramOutgoingReadStatuses(tokenValue) {
+  const token = String(tokenValue || "").trim();
+  if (!token) return false;
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingReadStatuses]: {} });
+  const statuses = { ...(stored[TELEGRAM_KEYS.outgoingReadStatuses] || {}) };
+  const grouped = new Map();
+  for (const [key, status] of Object.entries(statuses)) {
+    if (!status?.userId || !status?.messageId) continue;
+    if (!grouped.has(String(status.userId))) grouped.set(String(status.userId), []);
+    grouped.get(String(status.userId)).push([key, status]);
+  }
+
+  let resolved = false;
+  for (const [userId, entries] of grouped) {
+    let conversation;
+    try {
+      conversation = await fetchNodeSeekConversationMessages(userId);
+    } catch (_error) {
+      continue;
+    }
+    for (const [key, status] of entries) {
+      const message = conversation.msgArray.find((item) => String(item?.id) === String(status.messageId));
+      if (!message) continue;
+      if (isViewedMessage(message)) {
+        const restored = await editTelegramTopicReadMarker(token, status, false);
+        if (restored) {
+          delete statuses[key];
+          resolved = true;
+        }
+      } else if (isUnviewedMessage(message)) {
+        if (status.readState !== "unread"
+            || status.markerType !== TELEGRAM_TOPIC_UNREAD_MARKER_TYPE
+            || status.markerApplied !== true) {
+          const marked = await editTelegramTopicReadMarker(token, status, true);
+          statuses[key] = {
+            ...status,
+            markerType: TELEGRAM_TOPIC_UNREAD_MARKER_TYPE,
+            readState: "unread",
+            markerApplied: marked,
+            updatedAt: Date.now()
+          };
+        }
+      }
+    }
+  }
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingReadStatuses]: statuses });
+  return resolved;
 }
 
 function normalizeTelegramMessageBody(value) {
@@ -1106,6 +1516,7 @@ async function sendTelegramPrivateMessageToTopics(
   imageUrls = [],
   { includeDirectTargets = true } = {}
 ) {
+  const deliveredTopics = [];
   const targets = (Array.isArray(config[TELEGRAM_KEYS.targets]) ? config[TELEGRAM_KEYS.targets] : [])
     .filter((target) => target?.enabled !== false && target?.chatId);
   if (targets.length === 0) throw new Error("没有启用的 Telegram 推送目标");
@@ -1113,10 +1524,10 @@ async function sendTelegramPrivateMessageToTopics(
   const otherTargets = includeDirectTargets ? targets.filter((target) => target.type === "direct") : [];
 
   if (personalTargets.length === 0) {
-    if (!includeDirectTargets) return;
+    if (!includeDirectTargets) return deliveredTopics;
     if (imageUrls.length === 0) {
       await sendTelegramToTargets(config, fallbackText);
-      return;
+      return deliveredTopics;
     }
     const targetKeys = new Set();
     for (const target of targets) {
@@ -1125,7 +1536,7 @@ async function sendTelegramPrivateMessageToTopics(
       targetKeys.add(key);
       await sendTelegramPrivateMessageContent(config[TELEGRAM_KEYS.token], target, fallbackText, imageUrls);
     }
-    return;
+    return deliveredTopics;
   }
 
   for (const target of personalTargets) {
@@ -1139,10 +1550,12 @@ async function sendTelegramPrivateMessageToTopics(
       topicText,
       imageUrls
     );
+    deliveredTopics.push({ chatId: String(target.chatId), topicId: String(topic.topicId), name: topic.name });
   }
   for (const target of otherTargets) {
     await sendTelegramPrivateMessageContent(config[TELEGRAM_KEYS.token], target, fallbackText, imageUrls);
   }
+  return deliveredTopics;
 }
 
 async function sendTelegramPrivateMessageContent(token, target, text, imageUrls = []) {
@@ -1208,11 +1621,11 @@ function getManagedTelegramTopicStyle(topic) {
   if (!baseStyle || topic.kind !== "dm") return baseStyle;
 
   const currentIconId = String(topic.iconCustomEmojiId || "");
-  const storedAnimalStyle = topic.dmAnimalIconVersion === 1
-    ? TELEGRAM_DM_TOPIC_ANIMAL_ICONS.find((icon) => icon.customEmojiId === currentIconId)
+  const storedIconStyle = topic.dmAnimalIconVersion === 1
+    ? TELEGRAM_DM_TOPIC_ICONS.find((icon) => icon.customEmojiId === currentIconId)
     : null;
-  const icon = storedAnimalStyle || TELEGRAM_DM_TOPIC_ANIMAL_ICONS[
-    Math.floor(Math.random() * TELEGRAM_DM_TOPIC_ANIMAL_ICONS.length)
+  const icon = storedIconStyle || TELEGRAM_DM_TOPIC_ICONS[
+    Math.floor(Math.random() * TELEGRAM_DM_TOPIC_ICONS.length)
   ];
   return { ...baseStyle, iconCustomEmojiId: icon.customEmojiId, dmAnimalIconVersion: 1 };
 }
@@ -1222,8 +1635,8 @@ async function applyManagedTelegramTopicStyle(tokenValue, topic, nameValue) {
   const style = getManagedTelegramTopicStyle(topic);
   if (!token || !style || !topic?.chatId || !topic?.topicId) return topic;
 
-  const name = String(nameValue ?? topic.name ?? "").trim().slice(0, 128);
-  const nameChanged = name && String(topic.name || "") !== name;
+  const name = stripTelegramTopicUnreadPrefix(String(nameValue ?? topic.name ?? "").trim()).slice(0, 128);
+  const nameChanged = name && stripTelegramTopicUnreadPrefix(topic.name) !== name;
   const iconChanged = String(topic.iconCustomEmojiId || "") !== style.iconCustomEmojiId;
   const animalVersionChanged = topic.kind === "dm" && topic.dmAnimalIconVersion !== 1;
   if (!nameChanged && !iconChanged && !animalVersionChanged) return topic;
@@ -1573,8 +1986,19 @@ async function processTelegramManagedTopicUpdates(token, updates) {
     }
 
     const content = [text, ...imageMarkdowns].filter(Boolean).join("\n\n");
-    await sendNodeSeekPrivateMessage(topic.nsUserId, content, imageMarkdowns.length > 0);
-    await rememberTelegramOutgoingEcho(topic.nsUserId, content);
+    const echoId = await rememberTelegramOutgoingEcho(topic.nsUserId, content, {
+      chatId,
+      topicId,
+      topicName: topic.name
+    });
+    try {
+      await sendNodeSeekPrivateMessage(topic.nsUserId, content, imageMarkdowns.length > 0);
+      await updateTelegramOutgoingEchoStatus(echoId, "sent");
+    } catch (error) {
+      await discardTelegramOutgoingEcho(echoId);
+      throw error;
+    }
+    scheduleTelegramMonitorAlarm({ checkImmediately: true }).catch(() => {});
     for (const update of pendingUpdates) {
       const updateId = String(Number(update?.update_id) || "");
       if (updateId) {

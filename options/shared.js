@@ -77,6 +77,7 @@ const TELEGRAM_SYNC_CONFIG_DEFAULTS = {
   telegramMentionNotificationsEnabled: false,
   telegramReplyNotificationsEnabled: false,
   telegramMonitorIntervalSeconds: 30,
+  telegramOfflineMessageSyncEnabled: true,
   telegramRssMonitorIntervalSeconds: 60,
   telegramMonitorPaused: false,
   telegramBotToken: "",

@@ -133,6 +133,42 @@ test("Telegram monitor rebaseline clears RSS seen IDs and immediately checks", a
   expect(alarms).toContainEqual(["nshTelegram:rss", { delayInMinutes: 0.5, periodInMinutes: 0.5 }]);
 });
 
+test("disabled offline-message sync resets the private-message cursor before startup catch-up", async () => {
+  const stored = {
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageNotificationsEnabled: true,
+    telegramPostNotificationsEnabled: false,
+    telegramMentionNotificationsEnabled: false,
+    telegramReplyNotificationsEnabled: false,
+    telegramMonitorPaused: false,
+    telegramMonitorIntervalSeconds: 30,
+    telegramMessageCursors: { "777:222": "900" }
+  };
+  let monitorChecks = 0;
+  const sandbox = createSandbox();
+  sandbox.checkTelegramNotifications = async () => { monitorChecks += 1; };
+  sandbox.chrome = {
+    storage: { local: {
+      get: async (defaults) => ({ ...defaults, ...stored }),
+      set: async (values) => Object.assign(stored, values),
+      remove: async (key) => { delete stored[key]; }
+    } },
+    alarms: {
+      clear: async () => {},
+      create: async () => {}
+    }
+  };
+
+  await vm.runInContext(
+    "scheduleTelegramMonitorAlarm({ resetMessageBaseline: true, checkImmediately: true })",
+    sandbox
+  );
+
+  expect(stored.telegramMessageCursors).toBeUndefined();
+  expect(monitorChecks).toBe(1);
+});
+
 test("Telegram update check preserves established baselines", async () => {
   const stored = {
     telegramBotToken: "123456:secret",
@@ -855,12 +891,10 @@ test("managed topic categories use distinct icons and colors while user topics s
     { chat_id: "333", name: "回复", icon_color: 13338331, icon_custom_emoji_id: "5417915203100613993" },
     expect.objectContaining({ chat_id: "333", name: "Alice", icon_color: 7322096 })
   ]);
-  expect([
-    "5235912661102773458",
-    "5237999392438371490",
-    "5384574037701696503",
-    "5413625003218313783"
-  ]).toContain(createdTopics[4].icon_custom_emoji_id);
+  const topicIconIds = vm.runInContext("TELEGRAM_DM_TOPIC_ICONS.map((icon) => icon.customEmojiId)", sandbox);
+  expect(topicIconIds).toHaveLength(74);
+  expect(new Set(topicIconIds).size).toBe(topicIconIds.length);
+  expect(topicIconIds).toContain(createdTopics[4].icon_custom_emoji_id);
   expect(new Set(createdTopics.map((topic) => topic.icon_color)).size).toBe(5);
   expect(stored.telegramManagedTopics.map((topic) => topic.name)).toEqual(["系统", "监控", "提及", "回复", "Alice"]);
   expect(stored.telegramManagedTopics[4].dmAnimalIconVersion).toBe(1);
@@ -873,7 +907,7 @@ test("managed topic categories use distinct icons and colors while user topics s
   }]);
 });
 
-test("existing managed DM topics get one saved random animal icon without attempting to recolor", async () => {
+test("existing managed DM topics get one saved random topic icon without attempting to recolor", async () => {
   const stored = {
     telegramManagedTopics: [{
       id: "dm-1", kind: "dm", chatId: "333", topicId: "456", nsUserId: "222", name: "Alice",
@@ -902,9 +936,9 @@ test("existing managed DM topics get one saved random animal icon without attemp
   })`, sandbox);
 
   expect(editedTopics).toEqual([{
-    chat_id: "333", message_thread_id: 456, icon_custom_emoji_id: "5235912661102773458"
+    chat_id: "333", message_thread_id: 456, icon_custom_emoji_id: "5312241539987020022"
   }]);
-  expect(topic.iconCustomEmojiId).toBe("5235912661102773458");
+  expect(topic.iconCustomEmojiId).toBe("5312241539987020022");
   expect(topic.dmAnimalIconVersion).toBe(1);
   expect(repeatedTopic.iconCustomEmojiId).toBe(topic.iconCustomEmojiId);
   expect(randomCount).toBe(1);
@@ -917,7 +951,9 @@ test("private message sync mirrors both directions into one mapped user topic", 
     telegramSystemNotificationUserId: "",
     telegramMessageCursors: { "222:777": "1" }
   };
+  let outgoingViewed = 0;
   const telegramSends = [];
+  const topicEdits = [];
   const requestedUrls = [];
   const sandbox = createSandbox(async (url, options = {}) => {
     requestedUrls.push(url);
@@ -948,7 +984,8 @@ test("private message sync mirrors both directions into one mapped user topic", 
               receiver_id: "222",
               sender_name: "me",
               receiver_name: "Anderlille",
-              content: "我主动发出的消息"
+              content: "我主动发出的消息",
+              viewed: outgoingViewed
             },
             {
               id: 3,
@@ -968,12 +1005,21 @@ test("private message sync mirrors both directions into one mapped user topic", 
         chat_id: "333",
         name: "Anderlille",
         icon_color: 7322096,
-        icon_custom_emoji_id: "5235912661102773458"
+        icon_custom_emoji_id: "5312241539987020022"
       });
       return {
         ok: true,
         json: async () => ({ ok: true, result: { message_thread_id: 456 } })
       };
+    }
+    if (url.endsWith("/getForumTopicIconStickers")) {
+      return { ok: true, json: async () => ({ ok: true, result: [
+        { emoji: "👀", custom_emoji_id: "eyes-icon" }
+      ] }) };
+    }
+    if (url.endsWith("/editForumTopic")) {
+      topicEdits.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true, result: true }) };
     }
     if (url.endsWith("/sendMessage")) {
       telegramSends.push(JSON.parse(options.body));
@@ -1013,7 +1059,30 @@ test("private message sync mirrors both directions into one mapped user topic", 
     name: "Anderlille",
     nsUserId: "222"
   });
+  expect(topicEdits).toEqual([{
+    chat_id: "333",
+    message_thread_id: 456,
+    name: "Anderlille",
+    icon_custom_emoji_id: "eyes-icon"
+  }]);
+  expect(Object.values(stored.telegramOutgoingMessageReadStatuses)[0]).toMatchObject({
+    userId: "222",
+    messageId: "2",
+    readState: "unread",
+    markerType: "topic-icon-eyes",
+    markerApplied: true
+  });
   expect(stored.telegramMessageCursors["222:777"]).toBe("3");
+
+  outgoingViewed = 1;
+  expect(await vm.runInContext('checkPendingTelegramOutgoingReadStatuses("123456:secret")', sandbox)).toBe(true);
+  expect(topicEdits[1]).toEqual({
+    chat_id: "333",
+    message_thread_id: 456,
+    name: "Anderlille",
+    icon_custom_emoji_id: "5312241539987020022"
+  });
+  expect(stored.telegramOutgoingMessageReadStatuses).toEqual({});
 });
 
 test("overlapping Telegram monitor checks process a new private message once", async () => {
@@ -1266,4 +1335,126 @@ test("Telegram photo caption and uploaded image Markdown are sent as one NodeSee
   expect(nodeSeekSends[0].markdown).toBe(true);
   expect(stored.telegramOutgoingMessageEchoes).toHaveLength(1);
   expect(stored.telegramOutgoingMessageEchoes[0].userId).toBe("222");
+});
+
+test("unread Telegram-originated NodeSeek messages mark the mapped topic icon and read restores it", async () => {
+  const stored = {
+    telegramManagedTopics: [{
+      id: "dm-1", kind: "dm", chatId: "333", topicId: "456", nsUserId: "222", name: "Alice",
+      iconCustomEmojiId: "animal-icon"
+    }],
+    telegramOutgoingMessageReadStatuses: {}
+  };
+  const topicEdits = [];
+  const sandbox = createSandbox(async (url, options = {}) => {
+    if (url.endsWith("/getForumTopicIconStickers")) {
+      return { ok: true, json: async () => ({ ok: true, result: [
+        { emoji: "👀", custom_emoji_id: "eyes-icon" }
+      ] }) };
+    }
+    if (url.endsWith("/editForumTopic")) {
+      topicEdits.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true, result: true }) };
+    }
+    if (url === "https://www.nodeseek.com/api/notification/message/with/222") {
+      return { ok: true, json: async () => ({ success: true, msgArray: [{
+        id: 900, sender_id: "777", receiver_id: "222", content: "TG 回信", viewed: 1
+      }] }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+
+  await vm.runInContext(`recordTelegramOutgoingReadStatus("123456:secret", {
+    userId: "222", originChatId: "333", originTopicId: "456", originTopicName: "Alice"
+  }, { id: 900, viewed: 0 })`, sandbox);
+
+  expect(topicEdits).toEqual([{
+    chat_id: "333", message_thread_id: 456, name: "Alice", icon_custom_emoji_id: "eyes-icon"
+  }]);
+  expect(stored.telegramManagedTopics[0].iconCustomEmojiId).toBe("animal-icon");
+  expect(Object.values(stored.telegramOutgoingMessageReadStatuses)[0]).toMatchObject({
+    messageId: "900", readState: "unread", markerType: "topic-icon-eyes", markerApplied: true,
+    topicIconBeforeMarker: "animal-icon"
+  });
+
+  const resolved = await vm.runInContext('checkPendingTelegramOutgoingReadStatuses("123456:secret")', sandbox);
+  expect(resolved).toBe(true);
+  expect(topicEdits[1]).toEqual({
+    chat_id: "333", message_thread_id: 456, name: "Alice", icon_custom_emoji_id: "animal-icon"
+  });
+  expect(stored.telegramOutgoingMessageReadStatuses).toEqual({});
+});
+
+test("unread marker is not applied when the topic has no saved icon to restore", async () => {
+  const stored = {
+    telegramManagedTopics: [{ id: "dm-1", kind: "dm", chatId: "333", topicId: "456", name: "Alice" }]
+  };
+  let telegramRequests = 0;
+  const sandbox = createSandbox(async () => {
+    telegramRequests += 1;
+    return { ok: true, json: async () => ({ ok: true, result: [] }) };
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored })
+  } } };
+
+  const marked = await vm.runInContext(`editTelegramTopicReadMarker("token", {
+    chatId: "333", topicId: "456", topicName: "Alice"
+  }, true)`, sandbox);
+
+  expect(marked).toBe(false);
+  expect(telegramRequests).toBe(0);
+});
+
+test("existing unread topic marker updates in place to the eyes icon", async () => {
+  const stored = {
+    telegramManagedTopics: [{
+      id: "dm-1", kind: "dm", chatId: "333", topicId: "456", nsUserId: "222", name: "Alice",
+      iconCustomEmojiId: "animal-icon"
+    }],
+    telegramOutgoingMessageReadStatuses: {
+      "333:456": {
+        chatId: "333", topicId: "456", userId: "222", messageId: "900",
+        topicName: "Alice", topicIconBeforeMarker: "animal-icon", readState: "unread",
+        markerType: "name", markerApplied: true
+      }
+    }
+  };
+  const topicEdits = [];
+  const sandbox = createSandbox(async (url, options = {}) => {
+    if (url.endsWith("/getForumTopicIconStickers")) {
+      return { ok: true, json: async () => ({ ok: true, result: [
+        { emoji: "👀", custom_emoji_id: "eyes-icon" }
+      ] }) };
+    }
+    if (url.endsWith("/editForumTopic")) {
+      topicEdits.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true, result: true }) };
+    }
+    if (url === "https://www.nodeseek.com/api/notification/message/with/222") {
+      return { ok: true, json: async () => ({ success: true, msgArray: [{
+        id: 900, sender_id: "222", receiver_id: "777", content: "TG 回信", viewed: 0
+      }] }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+
+  await vm.runInContext('checkPendingTelegramOutgoingReadStatuses("123456:secret")', sandbox);
+
+  expect(topicEdits).toEqual([{
+    chat_id: "333", message_thread_id: 456, name: "Alice", icon_custom_emoji_id: "eyes-icon"
+  }]);
+  expect(stored.telegramManagedTopics[0]).toMatchObject({ topicId: "456", name: "Alice" });
+  expect(stored.telegramOutgoingMessageReadStatuses["333:456"]).toMatchObject({
+    messageId: "900", markerType: "topic-icon-eyes", markerApplied: true,
+    topicIconBeforeMarker: "animal-icon"
+  });
 });

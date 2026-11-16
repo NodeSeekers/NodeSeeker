@@ -142,6 +142,7 @@ async function restoreTelegramConfig() {
     telegramReplyNotificationsEnabled: null,
     telegramMentionReplyNotificationsEnabled: null,
     telegramMonitorIntervalSeconds: 30,
+    telegramOfflineMessageSyncEnabled: true,
     telegramBotToken: "",
     telegramChatId: "",
     telegramTargets: [],
@@ -220,6 +221,7 @@ async function restoreTelegramConfig() {
   });
   renderTelegramTargets();
   renderTelegramMonitorStatus(config);
+  renderTelegramOfflineMessageSync(config);
   renderTelegramHistory(config.telegramRssHistory);
   renderTelegramManagedTopics(config.telegramManagedTopics);
   syncTelegramTargetFields();
@@ -245,6 +247,7 @@ document.querySelector("#telegramPostNotificationsEnabled").addEventListener("ch
 document.querySelector("#telegramMentionNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramReplyNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramMonitorIntervalSeconds").addEventListener("change", saveTelegramMonitorInterval);
+document.querySelector("#toggleTelegramOfflineMessageSync").addEventListener("click", toggleTelegramOfflineMessageSync);
 document.querySelector("#telegramBlockedKeywords").addEventListener("input", scheduleTelegramConfigSave);
 document.querySelectorAll("[data-telegram-board]").forEach((input) => {
   input.addEventListener("change", scheduleTelegramConfigSave);
@@ -1090,6 +1093,26 @@ async function toggleTelegramPause() {
   showToast("保存成功");
 }
 
+async function toggleTelegramOfflineMessageSync() {
+  const state = await chrome.storage.local.get({ telegramOfflineMessageSyncEnabled: true });
+  const enabled = state.telegramOfflineMessageSyncEnabled === false;
+  await chrome.storage.local.set({ telegramOfflineMessageSyncEnabled: enabled });
+  renderTelegramOfflineMessageSync({ telegramOfflineMessageSyncEnabled: enabled });
+  showToast("保存成功");
+}
+
+function renderTelegramOfflineMessageSync(config) {
+  const enabled = config.telegramOfflineMessageSyncEnabled !== false;
+  const button = document.querySelector("#toggleTelegramOfflineMessageSync");
+  button.classList.toggle("is-monitoring", enabled);
+  button.classList.toggle("is-paused", !enabled);
+  button.setAttribute("aria-checked", String(enabled));
+  button.setAttribute("aria-label", `离线消息：${enabled ? "已开启" : "已关闭"}`);
+  button.title = enabled
+    ? "浏览器重新启动后补发离线期间的新私信"
+    : "浏览器重新启动后跳过离线期间的新私信";
+}
+
 function renderTelegramMonitorStatus(config) {
   const paused = Boolean(config.telegramMonitorPaused);
   const card = document.querySelector("#telegramMonitorStatusCard");
@@ -1281,6 +1304,7 @@ async function resetTelegramConfig() {
     "telegramMessageNotificationsEnabled", "telegramPostNotificationsEnabled",
     "telegramMentionNotificationsEnabled", "telegramReplyNotificationsEnabled", "telegramMentionReplyNotificationsEnabled",
     "telegramMonitorIntervalSeconds", "telegramRssMonitorIntervalSeconds",
+    "telegramOfflineMessageSyncEnabled",
     "telegramBotToken", "telegramTargets",
     "telegramChatId", "telegramKeywordRules", "telegramBlockedKeywords", "telegramBoardSlugs",
     "telegramMessageCursors", "telegramSystemNotificationUserId", "telegramRssSeenIds", "telegramRssInitialized", "telegramRssHistory",
@@ -1307,6 +1331,7 @@ async function resetTelegramConfig() {
     document.querySelector("#telegramMentionNotificationsEnabled").checked = false;
     document.querySelector("#telegramReplyNotificationsEnabled").checked = false;
     document.querySelector("#telegramMonitorIntervalSeconds").value = "30";
+    renderTelegramOfflineMessageSync({ telegramOfflineMessageSyncEnabled: true });
     document.querySelector("#telegramBlockedKeywords").value = "";
     document.querySelectorAll("[data-telegram-board]").forEach((input) => { input.checked = true; });
     telegramTargets = [];

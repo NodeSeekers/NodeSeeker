@@ -813,6 +813,13 @@ form {
   gap: 8px;
 }
 
+.telegram-monitor-status-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .telegram-monitor-interval select {
   width: auto;
   min-width: 130px;

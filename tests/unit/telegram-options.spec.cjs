@@ -6,10 +6,47 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.resolve(__dirname, "../../options/options.js"), "utf8");
 
 function extractFunction(name) {
-  const start = source.indexOf(`function ${name}(`);
+  const asyncStart = source.indexOf(`async function ${name}(`);
+  const start = asyncStart >= 0 ? asyncStart : source.indexOf(`function ${name}(`);
   const end = source.indexOf("\n}", start) + 2;
   return source.slice(start, end);
 }
+
+test("offline-message switch defaults on and persists each toggle", async () => {
+  const storage = {};
+  const classes = new Set();
+  const attributes = {};
+  const button = {
+    classList: { toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name) },
+    setAttribute: (name, value) => { attributes[name] = value; },
+    title: ""
+  };
+  const sandbox = vm.createContext({
+    chrome: { storage: { local: {
+      get: async (defaults) => ({ ...defaults, ...storage }),
+      set: async (values) => Object.assign(storage, values)
+    } } },
+    document: { querySelector: () => button },
+    showToast: () => {}
+  });
+  vm.runInContext([
+    extractFunction("toggleTelegramOfflineMessageSync"),
+    extractFunction("renderTelegramOfflineMessageSync")
+  ].join("\n"), sandbox);
+
+  vm.runInContext("renderTelegramOfflineMessageSync({})", sandbox);
+  expect(attributes["aria-checked"]).toBe("true");
+  expect(classes.has("is-monitoring")).toBe(true);
+
+  await vm.runInContext("toggleTelegramOfflineMessageSync()", sandbox);
+  expect(storage.telegramOfflineMessageSyncEnabled).toBe(false);
+  expect(attributes["aria-checked"]).toBe("false");
+  expect(classes.has("is-paused")).toBe(true);
+
+  await vm.runInContext("toggleTelegramOfflineMessageSync()", sandbox);
+  expect(storage.telegramOfflineMessageSyncEnabled).toBe(true);
+  expect(attributes["aria-checked"]).toBe("true");
+});
 
 test("typing a Bot Token schedules automatic validation without a separate button", () => {
   const calls = [];
