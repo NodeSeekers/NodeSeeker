@@ -20,6 +20,23 @@ function createSandbox() {
   return sandbox;
 }
 
+function createMutationSandbox(initialRules) {
+  const stored = { followRules: initialRules };
+  const sandbox = createSandbox();
+  sandbox.DEFAULT_FOLLOW_RULES = { keywordGroups: [], userGroups: [] };
+  sandbox.featureOptions = { followRules: initialRules };
+  sandbox.chrome = {
+    storage: {
+      local: {
+        get: async (defaults) => ({ ...defaults, ...stored }),
+        set: async (values) => Object.assign(stored, values)
+      }
+    }
+  };
+  sandbox.scanFollowRules = () => {};
+  return { sandbox, stored };
+}
+
 function getKeywordDecoration(sandbox, title, group) {
   return vm.runInContext(`(() => {
     const normalized = normalizeFollowRules({ keywordGroups: [${JSON.stringify(group)}] }).keywordGroups
@@ -146,4 +163,30 @@ test("content keyword editor splits comma-separated terms like RSS rules", () =>
   const parsed = vm.runInContext('parseFollowRuleEditorItems("台湾, 家宽，台湾\\n云服务器")', sandbox);
 
   expect(parsed).toEqual(["台湾", "家宽", "云服务器"]);
+});
+
+test("quick marking can add and remove one keyword without changing a combined rule", async () => {
+  const { sandbox, stored } = createMutationSandbox({
+    keywordGroups: [{
+      id: "mixed",
+      name: "关键词",
+      enabled: true,
+      rules: [{ id: "combo", enabled: true, mode: "all", terms: ["独角鲸", "邮箱"], excludeTerms: [] }],
+      styles: {}
+    }],
+    userGroups: []
+  });
+
+  expect(await vm.runInContext('getFollowRuleGroupOptions("keyword", "独角鲸")', sandbox))
+    .toEqual([{ id: "mixed", name: "关键词", enabled: true, followed: false }]);
+
+  await vm.runInContext('assignFollowRuleItemToGroup("keyword", "独角鲸", "mixed")', sandbox);
+  expect(JSON.parse(JSON.stringify(stored.followRules.keywordGroups[0].rules.map((rule) => rule.terms))))
+    .toEqual([["独角鲸", "邮箱"], ["独角鲸"]]);
+  expect(await vm.runInContext('getFollowRuleGroupOptions("keyword", "独角鲸")', sandbox))
+    .toEqual([{ id: "mixed", name: "关键词", enabled: true, followed: true }]);
+
+  await vm.runInContext('removeFollowRuleKeyword("独角鲸")', sandbox);
+  expect(JSON.parse(JSON.stringify(stored.followRules.keywordGroups[0].rules.map((rule) => rule.terms))))
+    .toEqual([["独角鲸", "邮箱"]]);
 });

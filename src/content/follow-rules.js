@@ -193,9 +193,56 @@ async function getFollowRuleGroupOptions(type, value) {
     name: group.name,
     enabled: group.enabled,
     followed: type === "keyword"
-      ? group.rules.some((rule) => rule.terms.some((item) => getFollowRuleItemIdentity(type, item) === identity))
+      ? group.rules.some((rule) => rule.terms.length === 1
+        && getFollowRuleItemIdentity(type, rule.terms[0]) === identity)
       : group.items.some((item) => getFollowRuleItemIdentity(type, item) === identity)
   }));
+}
+
+async function renameFollowRuleGroup(type, groupId, name) {
+  const config = FOLLOW_RULE_TYPE_CONFIG[type];
+  const normalizedName = normalizeFollowRuleText(name);
+  if (!config || !normalizedName) throw new Error("组名不能为空");
+  const saved = await chrome.storage.local.get({ followRules: DEFAULT_FOLLOW_RULES });
+  const rules = normalizeFollowRules(saved.followRules);
+  const group = rules[config.collectionKey].find((entry) => entry.id === groupId);
+  if (!group) throw new Error(`${config.groupLabel}不存在`);
+  group.name = normalizedName;
+  await saveFollowRules(rules);
+  return rules;
+}
+
+async function deleteFollowRuleGroup(type, groupId) {
+  const config = FOLLOW_RULE_TYPE_CONFIG[type];
+  if (!config) return false;
+  const saved = await chrome.storage.local.get({ followRules: DEFAULT_FOLLOW_RULES });
+  const rules = normalizeFollowRules(saved.followRules);
+  const groups = rules[config.collectionKey];
+  const nextGroups = groups.filter((group) => group.id !== groupId);
+  if (nextGroups.length === groups.length) return false;
+  rules[config.collectionKey] = nextGroups;
+  await saveFollowRules(rules);
+  return true;
+}
+
+async function removeFollowRuleKeyword(value) {
+  const keyword = normalizeBlockFilterList([value])[0] || "";
+  if (!keyword) return false;
+  const saved = await chrome.storage.local.get({ followRules: DEFAULT_FOLLOW_RULES });
+  const rules = normalizeFollowRules(saved.followRules);
+  const identity = getFollowRuleItemIdentity("keyword", keyword);
+  let removed = false;
+  rules.keywordGroups.forEach((group) => {
+    const nextRules = group.rules.filter((rule) => {
+      const isExactKeyword = rule.terms.length === 1
+        && getFollowRuleItemIdentity("keyword", rule.terms[0]) === identity;
+      if (isExactKeyword) removed = true;
+      return !isExactKeyword;
+    });
+    group.rules = nextRules;
+  });
+  if (removed) await saveFollowRules(rules);
+  return removed;
 }
 
 async function assignFollowRuleItemToGroup(type, value, groupId) {
@@ -220,8 +267,8 @@ async function assignFollowRuleItemToGroup(type, value, groupId) {
       entry.rules = entry.rules.filter((rule) => !(rule.terms.length === 1
         && getFollowRuleItemIdentity(type, rule.terms[0]) === identity));
     });
-    const alreadyPresent = group.rules.some((rule) => rule.terms
-      .some((item) => getFollowRuleItemIdentity(type, item) === identity));
+    const alreadyPresent = group.rules.some((rule) => rule.terms.length === 1
+      && getFollowRuleItemIdentity(type, rule.terms[0]) === identity);
     if (!alreadyPresent) {
       group.rules.push(createFollowRuleSingleKeywordRule(normalizedValue));
     }
@@ -524,6 +571,247 @@ function openFollowRuleGroupDialog(type, value, groups) {
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
     cancelButton.focus();
+  });
+}
+
+function openKeywordFollowRuleDialog(value, initialGroups) {
+  return new Promise((resolve) => {
+    let groups = initialGroups;
+    let selectedGroupId = groups.find((group) => group.followed)?.id || groups[0]?.id || "";
+    let mode = groups.length ? "select" : "create";
+    let lookupId = 0;
+    const backdrop = document.createElement("div");
+    backdrop.className = "nsh-dialog-backdrop";
+    const dialog = document.createElement("section");
+    dialog.className = "nsh-dialog nsh-follow-rule-dialog nsh-keyword-follow-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    const title = document.createElement("h2");
+    title.textContent = "标记关键词";
+    const message = document.createElement("p");
+    message.textContent = "可以直接修改选中的文字，再选择保存到哪个分组。";
+    const keywordField = document.createElement("label");
+    keywordField.className = "nsh-keyword-follow-field";
+    const keywordLabel = document.createElement("span");
+    keywordLabel.textContent = "关键词";
+    const keywordInput = document.createElement("input");
+    keywordInput.type = "text";
+    keywordInput.maxLength = 120;
+    keywordInput.value = value;
+    keywordInput.autocomplete = "off";
+    keywordField.append(keywordLabel, keywordInput);
+    const markStatus = document.createElement("div");
+    markStatus.className = "nsh-keyword-follow-status";
+    const markStatusText = document.createElement("span");
+    const unmarkButton = document.createElement("button");
+    unmarkButton.type = "button";
+    unmarkButton.className = "nsh-keyword-follow-unmark";
+    unmarkButton.textContent = "取消独立标记";
+    markStatus.append(markStatusText, unmarkButton);
+    const list = document.createElement("div");
+    list.className = "nsh-follow-rule-group-list";
+    const createField = document.createElement("label");
+    createField.className = "nsh-follow-rule-create-group";
+    const createLabel = document.createElement("span");
+    createLabel.textContent = "新分组名称";
+    const createInput = document.createElement("input");
+    createInput.type = "text";
+    createInput.maxLength = 40;
+    createInput.placeholder = "输入分组名称";
+    createField.append(createLabel, createInput);
+    const manageList = document.createElement("div");
+    manageList.className = "nsh-keyword-follow-manage-list";
+    const actions = document.createElement("div");
+    actions.className = "nsh-dialog-actions";
+    const addGroupButton = document.createElement("button");
+    addGroupButton.type = "button";
+    addGroupButton.className = "nsh-follow-rule-add-group";
+    addGroupButton.textContent = "新建分组";
+    const manageGroupsButton = document.createElement("button");
+    manageGroupsButton.type = "button";
+    manageGroupsButton.textContent = "管理分组";
+    const backButton = document.createElement("button");
+    backButton.type = "button";
+    backButton.textContent = "返回分组";
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = "取消";
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.className = "nsh-dialog-primary";
+    saveButton.textContent = "标记";
+    actions.append(addGroupButton, manageGroupsButton, backButton, cancelButton, saveButton);
+    dialog.append(title, message, keywordField, markStatus, list, createField, manageList, actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+
+    const close = (selection = null) => {
+      document.removeEventListener("keydown", handleKeyDown);
+      backdrop.remove();
+      resolve(selection);
+    };
+    const renderList = () => {
+      list.replaceChildren();
+      if (!groups.length) {
+        const empty = document.createElement("p");
+        empty.className = "nsh-follow-rule-group-empty";
+        empty.textContent = "还没有关键词分组，请新建一个。";
+        list.appendChild(empty);
+      }
+      groups.forEach((group) => {
+        const label = document.createElement("label");
+        label.className = "nsh-follow-rule-group-option";
+        const input = document.createElement("input");
+        input.type = "radio";
+        input.name = "nsh-keyword-follow-group";
+        input.value = group.id;
+        input.checked = selectedGroupId === group.id;
+        const name = document.createElement("span");
+        name.textContent = group.name;
+        const status = document.createElement("small");
+        status.textContent = group.followed ? "已标记" : (!group.enabled ? "已停用" : "");
+        label.append(input, name);
+        if (status.textContent) label.appendChild(status);
+        list.appendChild(label);
+      });
+      const markedGroups = groups.filter((group) => group.followed);
+      markStatus.hidden = mode !== "select" || markedGroups.length === 0;
+      markStatusText.textContent = markedGroups.length
+        ? `「${normalizeFollowRuleText(keywordInput.value)}」作为单独关键词标记在：${markedGroups.map((group) => group.name).join("、")}`
+        : "";
+      addGroupButton.hidden = mode !== "select";
+      manageGroupsButton.hidden = mode !== "select";
+      backButton.hidden = mode === "select";
+      list.hidden = mode !== "select";
+      createField.hidden = mode !== "create";
+      manageList.hidden = mode !== "manage";
+      saveButton.hidden = mode === "manage";
+      saveButton.textContent = mode === "create" ? "创建并标记" : "标记";
+      saveButton.disabled = mode === "select" && !selectedGroupId;
+    };
+    const renderManageList = () => {
+      manageList.replaceChildren();
+      if (!groups.length) {
+        const empty = document.createElement("p");
+        empty.className = "nsh-follow-rule-group-empty";
+        empty.textContent = "没有可管理的关键词分组。";
+        manageList.appendChild(empty);
+        return;
+      }
+      groups.forEach((group) => {
+        const row = document.createElement("div");
+        row.className = "nsh-keyword-follow-manage-row";
+        const name = document.createElement("input");
+        name.type = "text";
+        name.maxLength = 40;
+        name.value = group.name;
+        name.setAttribute("aria-label", `分组名称：${group.name}`);
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.textContent = "保存名称";
+        rename.addEventListener("click", async () => {
+          try {
+            await renameFollowRuleGroup("keyword", group.id, name.value);
+            await refreshGroups();
+          } catch (error) {
+            message.textContent = error.message || "分组名称保存失败";
+          }
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "nsh-keyword-follow-delete";
+        remove.textContent = "删除";
+        remove.addEventListener("click", async () => {
+          const confirmed = await openNshConfirmDialog({
+            title: "删除关键词分组",
+            message: `确定删除「${group.name}」及其中的标记规则吗？`,
+            confirmText: "删除分组",
+            confirmClassName: "nsh-dialog-danger"
+          });
+          if (!confirmed) return;
+          try {
+            await deleteFollowRuleGroup("keyword", group.id);
+            await refreshGroups();
+          } catch (error) {
+            message.textContent = error.message || "分组删除失败";
+          }
+        });
+        row.append(name, rename, remove);
+        manageList.appendChild(row);
+      });
+    };
+    const refreshGroups = async () => {
+      const currentLookupId = ++lookupId;
+      const nextGroups = await getFollowRuleGroupOptions("keyword", keywordInput.value);
+      if (currentLookupId !== lookupId) return;
+      groups = nextGroups;
+      if (!groups.some((group) => group.id === selectedGroupId)) {
+        selectedGroupId = groups.find((group) => group.followed)?.id || groups[0]?.id || "";
+      }
+      renderList();
+      if (mode === "manage") renderManageList();
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") close();
+      if (event.key === "Enter" && mode !== "manage") {
+        event.preventDefault();
+        saveButton.click();
+      }
+    };
+    keywordInput.addEventListener("input", refreshGroups);
+    list.addEventListener("change", (event) => {
+      if (event.target.matches("input[type='radio']")) {
+        selectedGroupId = event.target.value;
+        renderList();
+      }
+    });
+    addGroupButton.addEventListener("click", () => {
+      mode = "create";
+      createInput.value = "";
+      renderList();
+      createInput.focus();
+    });
+    manageGroupsButton.addEventListener("click", () => {
+      mode = "manage";
+      renderList();
+      renderManageList();
+    });
+    backButton.addEventListener("click", () => {
+      mode = "select";
+      renderList();
+    });
+    unmarkButton.addEventListener("click", () => {
+      const currentValue = normalizeFollowRuleText(keywordInput.value);
+      if (currentValue) close({ mode: "unmark", value: currentValue });
+    });
+    cancelButton.addEventListener("click", () => close());
+    saveButton.addEventListener("click", () => {
+      const currentValue = normalizeFollowRuleText(keywordInput.value);
+      if (!currentValue) {
+        keywordInput.setCustomValidity("请输入关键词");
+        keywordInput.reportValidity();
+        return;
+      }
+      keywordInput.setCustomValidity("");
+      if (mode === "create") {
+        const groupName = normalizeFollowRuleText(createInput.value);
+        if (!groupName) {
+          createInput.setCustomValidity("请输入分组名称");
+          createInput.reportValidity();
+          return;
+        }
+        close({ mode: "create", groupName, value: currentValue });
+        return;
+      }
+      if (selectedGroupId) close({ mode: "select", groupId: selectedGroupId, value: currentValue });
+    });
+    createInput.addEventListener("input", () => createInput.setCustomValidity(""));
+    keywordInput.addEventListener("input", () => keywordInput.setCustomValidity(""));
+    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+    document.addEventListener("keydown", handleKeyDown);
+    renderList();
+    keywordInput.focus();
+    keywordInput.select();
   });
 }
 

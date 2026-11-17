@@ -1500,6 +1500,139 @@
   width: min(420px, 100%);
 }
 
+.nsh-keyword-follow-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+
+.nsh-keyword-follow-field,
+.nsh-keyword-block-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: #24292f;
+  font-weight: 600;
+}
+
+.nsh-keyword-follow-field input,
+.nsh-keyword-block-field input,
+.nsh-keyword-follow-manage-row input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cfd7df;
+  border-radius: 6px;
+  background: #fff;
+  color: #24292f;
+  font: inherit;
+  padding: 9px 10px;
+}
+
+.nsh-keyword-follow-field input:focus,
+.nsh-keyword-block-field input:focus,
+.nsh-keyword-follow-manage-row input:focus {
+  border-color: #16845f;
+  outline: 3px solid rgba(22, 132, 95, 0.16);
+}
+
+.nsh-keyword-follow-status,
+.nsh-keyword-block-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  border-radius: 6px;
+  background: #eef8f3;
+  color: #176b4a;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.nsh-keyword-follow-status[hidden],
+.nsh-keyword-block-status[hidden],
+.nsh-keyword-follow-manage-list[hidden],
+.nsh-keyword-follow-dialog [hidden],
+.nsh-keyword-block-dialog [hidden] {
+  display: none;
+}
+
+.nsh-keyword-follow-unmark,
+.nsh-keyword-follow-manage-row button,
+.nsh-keyword-block-row button {
+  flex: 0 0 auto;
+  padding: 6px 9px !important;
+  font-size: 12px !important;
+}
+
+.nsh-keyword-follow-unmark,
+.nsh-keyword-follow-delete,
+.nsh-keyword-block-row button {
+  color: #cf222e;
+}
+
+.nsh-keyword-follow-manage-list,
+.nsh-keyword-block-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(260px, calc(100vh - 300px));
+  overflow: auto;
+  margin-top: 12px;
+}
+
+.nsh-keyword-follow-manage-row,
+.nsh-keyword-block-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nsh-keyword-follow-manage-row input,
+.nsh-keyword-block-row span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nsh-keyword-block-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+
+.nsh-keyword-block-manage {
+  margin-top: 14px;
+  border-top: 1px solid #d8dee4;
+  padding-top: 12px;
+}
+
+.nsh-keyword-block-manage summary {
+  cursor: pointer;
+  color: #57606a;
+  font-weight: 600;
+}
+
+.nsh-keyword-block-row span {
+  overflow-wrap: anywhere;
+}
+
+.nsh-keyword-block-empty {
+  margin: 0;
+  color: #6a737d;
+  text-align: center;
+  padding: 10px;
+}
+
+.nsh-keyword-follow-dialog .nsh-dialog-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.nsh-keyword-follow-dialog .nsh-dialog-primary {
+  margin-left: auto;
+}
+
 .nsh-follow-rule-group-list {
   display: grid;
   gap: 8px;

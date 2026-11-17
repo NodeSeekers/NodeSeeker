@@ -374,22 +374,28 @@ async function handleBlockFilterSelectionFollow(event) {
   button.disabled = true;
   try {
     const groups = await getFollowRuleGroupOptions(selectionType, value);
-    const selection = await openFollowRuleGroupDialog(selectionType, value, groups);
+    const selection = selectionType === "keyword"
+      ? await openKeywordFollowRuleDialog(value, groups)
+      : await openFollowRuleGroupDialog(selectionType, value, groups);
     if (!selection) {
       return;
     }
+    const selectedValue = selection.value || value;
     if (selection.mode === "create") {
       await createNamedFollowRuleGroup(
         selectionType,
         selection.groupName,
-        value,
+        selectedValue,
         selection.groupIds
       );
+    } else if (selection.mode === "unmark") {
+      await removeFollowRuleKeyword(selectedValue);
+      completedText = "已取消标记";
     } else if (selection.mode === "manage") {
       await setFollowedUserGroups(value, selection.groupIds);
       completedText = "已保存";
     } else {
-      await assignFollowRuleItemToGroup(selectionType, value, selection.groupId);
+      await assignFollowRuleItemToGroup(selectionType, selectedValue, selection.groupId);
     }
     completed = true;
     showBlockFilterSelectionAddedState("follow", selectionType, completedText);
@@ -413,6 +419,15 @@ async function handleBlockFilterSelectionBlock(event) {
   }
 
   const selectionType = blockFilterSelectionType;
+  if (selectionType === "keyword") {
+    hideBlockFilterSelectionBubble();
+    try {
+      await openKeywordBlockDialog(value);
+    } catch (error) {
+      showBlockFilterSelectionAddedState("block", selectionType, error.message || "屏蔽词操作失败");
+    }
+    return;
+  }
   const storageKey = selectionType === "user" ? "blockedUsers" : "blockedKeywords";
   if (!await confirmBlockFilterSelectionAdd(value, selectionType)) {
     return;
@@ -447,6 +462,171 @@ async function addBlockFilterValue(storageKey, value) {
 
   scanBlockFilters();
   return values;
+}
+
+async function removeBlockFilterValue(storageKey, value) {
+  const normalizedValue = normalizeBlockFilterList([value])[0] || "";
+  if (!normalizedValue) return [];
+
+  const saved = await chrome.storage.local.get({ [storageKey]: [] });
+  const identity = normalizedValue.toLocaleLowerCase();
+  const values = normalizeBlockFilterList(saved[storageKey])
+    .filter((entry) => entry.toLocaleLowerCase() !== identity);
+  await chrome.storage.local.set({ [storageKey]: values });
+  featureOptions = { ...featureOptions, [storageKey]: values };
+  scanBlockFilters();
+  return values;
+}
+
+async function openKeywordBlockDialog(value) {
+  let keywords = normalizeBlockFilterList((await chrome.storage.local.get({ blockedKeywords: [] })).blockedKeywords);
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "nsh-dialog-backdrop";
+    const dialog = document.createElement("section");
+    dialog.className = "nsh-dialog nsh-keyword-block-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+
+    const title = document.createElement("h2");
+    title.textContent = "屏蔽关键词";
+    const description = document.createElement("p");
+    description.textContent = "可以修改选中的文字，再添加或管理屏蔽词。";
+
+    const field = document.createElement("label");
+    field.className = "nsh-keyword-block-field";
+    const label = document.createElement("span");
+    label.textContent = "关键词";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 120;
+    input.value = value;
+    input.autocomplete = "off";
+    field.append(label, input);
+
+    const status = document.createElement("div");
+    status.className = "nsh-keyword-block-status";
+    const statusText = document.createElement("span");
+    const undoButton = document.createElement("button");
+    undoButton.type = "button";
+    undoButton.className = "nsh-keyword-block-undo";
+    status.append(statusText, undoButton);
+
+    const manage = document.createElement("details");
+    manage.className = "nsh-keyword-block-manage";
+    const summary = document.createElement("summary");
+    const list = document.createElement("div");
+    list.className = "nsh-keyword-block-list";
+    manage.append(summary, list);
+
+    const actions = document.createElement("div");
+    actions.className = "nsh-dialog-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = "关闭";
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "nsh-dialog-primary nsh-keyword-block-add";
+    addButton.textContent = "添加屏蔽词";
+    actions.append(cancelButton, addButton);
+    dialog.append(title, description, field, status, manage, actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+
+    const close = (result = null) => {
+      document.removeEventListener("keydown", handleKeyDown);
+      backdrop.remove();
+      resolve(result);
+    };
+    const isBlocked = (keyword) => keywords.some((entry) =>
+      entry.toLocaleLowerCase() === keyword.toLocaleLowerCase());
+    const render = () => {
+      const keyword = normalizeBlockFilterList([input.value])[0] || "";
+      const exists = Boolean(keyword && isBlocked(keyword));
+      status.hidden = !exists;
+      statusText.textContent = exists ? `「${keyword}」已在屏蔽词中` : "";
+      undoButton.textContent = "撤销屏蔽";
+      undoButton.hidden = !exists;
+      addButton.disabled = !keyword || exists;
+      summary.textContent = `管理屏蔽词（${keywords.length}）`;
+      list.replaceChildren();
+      if (!keywords.length) {
+        const empty = document.createElement("p");
+        empty.className = "nsh-keyword-block-empty";
+        empty.textContent = "还没有屏蔽词。";
+        list.appendChild(empty);
+      }
+      keywords.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "nsh-keyword-block-row";
+        const text = document.createElement("span");
+        text.textContent = entry;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "删除";
+        remove.addEventListener("click", async () => {
+          try {
+            keywords = await removeBlockFilterValue("blockedKeywords", entry);
+            render();
+          } catch (error) {
+            status.hidden = false;
+            statusText.textContent = error.message || "删除失败";
+          }
+        });
+        row.append(text, remove);
+        list.appendChild(row);
+      });
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") close();
+      if (event.key === "Enter" && event.target === input) {
+        event.preventDefault();
+        addButton.click();
+      }
+    };
+
+    input.addEventListener("input", render);
+    addButton.addEventListener("click", async () => {
+      const keyword = normalizeBlockFilterList([input.value])[0] || "";
+      if (!keyword) {
+        input.setCustomValidity("请输入关键词");
+        input.reportValidity();
+        return;
+      }
+      input.setCustomValidity("");
+      try {
+        keywords = await addBlockFilterValue("blockedKeywords", keyword);
+        render();
+        status.hidden = false;
+        statusText.textContent = `已添加「${keyword}」`;
+        undoButton.hidden = false;
+        addButton.disabled = true;
+      } catch (error) {
+        status.hidden = false;
+        statusText.textContent = error.message || "添加失败";
+      }
+    });
+    undoButton.addEventListener("click", async () => {
+      const keyword = normalizeBlockFilterList([input.value])[0] || "";
+      try {
+        keywords = await removeBlockFilterValue("blockedKeywords", keyword);
+        render();
+        status.hidden = false;
+        statusText.textContent = `已撤销「${keyword}」`;
+      } catch (error) {
+        status.hidden = false;
+        statusText.textContent = error.message || "撤销失败";
+      }
+    });
+    cancelButton.addEventListener("click", () => close());
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) close();
+    });
+    document.addEventListener("keydown", handleKeyDown);
+    render();
+    input.focus();
+    input.select();
+  });
 }
 
 function confirmBlockFilterSelectionAdd(text, type) {
