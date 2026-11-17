@@ -1051,20 +1051,23 @@ async function checkForNewNodeSeekActivity(config, kind) {
     return;
   }
 
-  const unreadEntries = candidates.filter(isUnviewedMessage);
+  // The notification ID, not NodeSeek's current read state, determines whether
+  // this event is new. Users may open the mention/reply in NodeSeek before the
+  // next poll; filtering by `viewed` would then consume the cursor without alerting.
+  const newEntries = candidates;
   let currentUserId = "";
-  if (unreadEntries.length > 0) {
+  if (newEntries.length > 0) {
     currentUserId = String((await fetchLuckyCurrentUser("https://www.nodeseek.com/"))?.member_id || "").trim();
     if (!currentUserId) {
       throw new Error("无法确认当前 NodeSeek 账号，已跳过通知以避免误报");
     }
-    if (unreadEntries.some((entry) => !normalizeTelegramActivityId(entry?.commenter_id))) {
+    if (newEntries.some((entry) => !normalizeTelegramActivityId(entry?.commenter_id))) {
       throw new Error("通知缺少作者 ID，已跳过发送以避免误报");
     }
   }
 
   // Entries from the API are newest-first; send oldest-first when a poll finds several.
-  const notificationEntries = unreadEntries.reverse().filter((entry) => {
+  const notificationEntries = newEntries.reverse().filter((entry) => {
     return normalizeTelegramActivityId(entry.commenter_id) !== currentUserId;
   });
   const activityContents = await fetchTelegramActivityCommentContents(notificationEntries);

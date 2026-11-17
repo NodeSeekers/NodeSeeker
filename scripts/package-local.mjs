@@ -55,6 +55,7 @@ await fs.mkdir(outputDirectory, { recursive: true });
 for (const entry of ["assets", "options", "src"]) {
   await fs.cp(path.join(root, entry), path.join(outputDirectory, entry), { recursive: true });
 }
+await fs.copyFile(path.join(root, "README.md"), path.join(outputDirectory, "README.md"));
 
 const manifest = JSON.parse(await fs.readFile(path.join(root, "manifest.json"), "utf8"));
 delete manifest.key;

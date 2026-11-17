@@ -973,7 +973,7 @@ test("activity notification places the post link before mention or reply content
   expect(text.indexOf("回复: 回复正文")).toBeGreaterThan(text.indexOf("https://www.nodeseek.com/post-1054082-1"));
 });
 
-test("mention and reply notifications split quoted text from the new reply even when the API includes content", async () => {
+test("new mention and reply notifications are delivered even when already read and split quoted text", async () => {
   for (const kind of ["at", "reply"]) {
     const stored = {
       telegramMentionReplyCursors: { [kind]: { initialized: true, ids: ["11"] } }
@@ -987,7 +987,7 @@ test("mention and reply notifications split quoted text from the new reply even 
       commenter_name: "Alice",
       title: "主题标题",
       content: "API 中的未拆分内容",
-      viewed: 0
+      viewed: 1
     };
     const sent = [];
     const pageRequests = [];
