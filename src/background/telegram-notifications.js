@@ -1188,9 +1188,22 @@ async function checkRssPosts(config) {
   const newPosts = posts.filter((post) => post.id && !seen.has(post.id)).reverse();
   const history = [...config[TELEGRAM_KEYS.rssHistory]];
   const addedIds = [];
+  let currentUser;
+  let currentUserLoaded = false;
   for (const post of newPosts) {
     const matched = matchTelegramRssPost(post, config);
     if (matched.length > 0) {
+      if (!currentUserLoaded) {
+        currentUser = typeof fetchLuckyCurrentUser === "function"
+          ? await fetchLuckyCurrentUser("https://www.nodeseek.com/")
+          : null;
+        currentUserLoaded = true;
+      }
+      if (await isTelegramRssPostFromCurrentUser(post, currentUser)) {
+        addedIds.push(post.id);
+        continue;
+      }
+
       const board = post.categories.length > 0 ? post.categories.join("、") : "未标注";
       await sendTelegramActivityNotification(
         config,
@@ -1222,9 +1235,75 @@ function parseNodeSeekRss(xml) {
         .map((category) => decodeXmlText(category[1]).trim())
         .filter(Boolean);
       const id = String(guid || link).match(/post-(\d+)/i)?.[1] || guid || link;
-      return { id, title, link, categories: categoryValues };
+      const author = readNodeSeekRssAuthor(item);
+      return { id, title, link, categories: categoryValues, ...author };
     })
     .filter((post) => post.id && post.title && isSafeNodeSeekPostUrl(post.link));
+}
+
+function readNodeSeekRssAuthor(item) {
+  const authorBlock = item.match(/<author\b[^>]*>([\s\S]*?)<\/author>/i)?.[1] || "";
+  const authorId = [
+    readRssTag(item, "author_id"),
+    readRssTag(item, "authorId"),
+    readRssTag(item, "creator_id"),
+    readRssTag(item, "creatorId")
+  ].find(Boolean) || authorBlock.match(/\/space\/(\d+)/i)?.[1] || "";
+  const authorName = [
+    readRssTag(item, "dc:creator"),
+    readRssTag(item, "creator"),
+    readRssTag(authorBlock, "name"),
+    authorBlock ? decodeXmlText(authorBlock) : ""
+  ].find(Boolean) || "";
+  return {
+    ...(authorId ? { authorId: String(authorId).trim() } : {}),
+    ...(authorName ? { authorName: String(authorName).trim() } : {})
+  };
+}
+
+async function isTelegramRssPostFromCurrentUser(post, currentUser) {
+  const currentUserId = String(currentUser?.member_id || "").trim();
+  const currentUserName = normalizeTelegramRssAuthorName(currentUser?.member_name);
+  if (!currentUserId && !currentUserName) return false;
+
+  let authorId = String(post.authorId || "").trim();
+  let authorName = normalizeTelegramRssAuthorName(post.authorName);
+  if (!authorId) {
+    const response = await fetchWithTimeout(post.link, {
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "text/html" }
+    });
+    if (!response.ok) throw new Error(`读取 NodeSeek 帖子作者失败：HTTP ${response.status}`);
+    const pageAuthor = parseTelegramRssPostAuthor(await response.text());
+    authorId = pageAuthor.authorId;
+    authorName ||= pageAuthor.authorName;
+  }
+
+  return Boolean(
+    (currentUserId && authorId && authorId === currentUserId)
+    || (currentUserName && authorName && authorName === currentUserName)
+  );
+}
+
+function parseTelegramRssPostAuthor(html) {
+  const links = [...String(html || "").matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)];
+  const authorLink = links.find((match) => {
+    const className = match[1].match(/\bclass=["']([^"']*)["']/i)?.[1] || "";
+    const href = match[1].match(/\bhref=["']([^"']*)["']/i)?.[1] || "";
+    return className.split(/\s+/).includes("author-name") && /\/space\/[^/?#]+/i.test(href);
+  });
+  const href = authorLink?.[1].match(/\bhref=["']([^"']*)["']/i)?.[1] || "";
+  const authorId = href.match(/\/space\/([^/?#]+)/i)?.[1] || "";
+  const authorName = authorLink?.[2] || "";
+  return {
+    authorId: decodeXmlText(authorId),
+    authorName: normalizeTelegramRssAuthorName(decodeXmlText(authorName))
+  };
+}
+
+function normalizeTelegramRssAuthorName(value) {
+  return decodeXmlText(String(value || "")).trim().replace(/^@/, "").toLocaleLowerCase();
 }
 
 function readRssTag(item, name) {

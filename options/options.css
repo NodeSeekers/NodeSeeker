@@ -1501,6 +1501,11 @@ textarea {
   resize: vertical;
 }
 
+textarea.telegram-blocked-keywords {
+  min-height: 42px;
+  height: 42px;
+}
+
 .password-field {
   display: flex;
   color: inherit;

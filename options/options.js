@@ -219,7 +219,7 @@ async function restoreTelegramConfig() {
     [10, 30, 60, 300, 900].includes(monitorIntervalSeconds) ? String(monitorIntervalSeconds) : "30";
   telegramKeywordRules = normalizeTelegramKeywordRules(config.telegramKeywordRules);
   renderTelegramKeywordRules();
-  document.querySelector("#telegramBlockedKeywords").value = config.telegramBlockedKeywords.join("\n");
+  document.querySelector("#telegramBlockedKeywords").value = config.telegramBlockedKeywords.join(" ");
   const boardInputs = Array.from(document.querySelectorAll("[data-telegram-board]"));
   const selectedBoards = config.telegramBoardSlugs.length
     ? new Set(config.telegramBoardSlugs)
