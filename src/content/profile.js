@@ -583,7 +583,7 @@ function createProfileHomeTitle(memberId, memberName) {
   nameLink.rel = "noopener noreferrer";
   nameLink.textContent = memberName || "NodeSeek 用户";
   nameLink.title = "在新标签页打开用户主页";
-  title.append(nameLink, createProfileUserActions(memberName || memberId));
+  title.append(nameLink, createProfileUserActions(memberName || memberId, memberId, true));
   return title;
 }
 
@@ -658,7 +658,7 @@ function createProfileTrendTitle(memberId, memberName) {
   const text = document.createElement("span");
   text.className = "nsh-profile-trend-title-text";
   text.textContent = `${memberName || "用户"} 数据趋势`;
-  title.append(text, createProfileUserActions(memberName || memberId));
+  title.append(text, createProfileUserActions(memberName || memberId, memberId, true));
   return title;
 }
 
@@ -1642,11 +1642,27 @@ async function openProfileDetailDialog(memberId, memberName) {
   }
 }
 
-function createProfileUserActions(userName) {
+function createProfileUserActions(userName, memberId = "", includeMessage = false) {
   const actions = document.createElement("div");
   actions.className = "nsh-profile-user-actions";
   actions.append(createProfileFollowButton(userName), createProfileBlockButton(userName));
+  if (includeMessage) {
+    const messageLink = createProfileMessageLink(memberId, userName);
+    if (messageLink) actions.appendChild(messageLink);
+  }
   return actions;
+}
+
+function createProfileMessageLink(memberId, userName) {
+  const normalizedMemberId = String(memberId || "").match(/^\d+$/)?.[0] || "";
+  if (!normalizedMemberId) return null;
+
+  const link = document.createElement("a");
+  link.className = "nsh-profile-user-action-button nsh-profile-message-button";
+  link.href = `/notification#/message?mode=talk&to=${encodeURIComponent(normalizedMemberId)}`;
+  link.textContent = "私信";
+  link.title = `给 ${userName || normalizedMemberId} 发送私信`;
+  return link;
 }
 
 function createProfileFollowButton(userName) {

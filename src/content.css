@@ -1435,6 +1435,7 @@
   font-weight: 700;
   line-height: 1;
   padding: 6px 10px;
+  text-decoration: none;
   white-space: nowrap;
 }
 
@@ -1456,6 +1457,16 @@
 .nsh-profile-user-actions .nsh-profile-block-button:hover:not(:disabled) {
   border-color: #a40e26;
   background: #a40e26;
+}
+
+.nsh-profile-user-actions .nsh-profile-message-button {
+  border-color: #0969da;
+  background: #0969da;
+}
+
+.nsh-profile-user-actions .nsh-profile-message-button:hover {
+  border-color: #0550ae;
+  background: #0550ae;
 }
 
 .nsh-profile-user-actions .nsh-profile-user-action-button:disabled {

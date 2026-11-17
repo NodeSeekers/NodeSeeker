@@ -1,8 +1,28 @@
+const TELEGRAM_WORKER_SESSION_KEY = "telegramMonitorWorkerSessionInitialized";
+
 discardLegacyStorage();
 scheduleLuckyNotificationAlarmSync();
 scheduleProfileRetentionPrune();
-scheduleTelegramMonitorAlarm();
+scheduleTelegramMonitorAlarmForWorkerStart().catch((error) => {
+  console.warn("Telegram worker startup setup failed:", error?.message || "unknown error");
+  scheduleTelegramMonitorAlarm();
+});
 scheduleAutoAttendanceAlarm();
+
+async function scheduleTelegramMonitorAlarmForWorkerStart() {
+  const sessionStorage = chrome.storage.session;
+  if (!sessionStorage?.get || !sessionStorage?.set) {
+    return scheduleTelegramMonitorAlarm();
+  }
+
+  const sessionState = await sessionStorage.get({ [TELEGRAM_WORKER_SESSION_KEY]: false });
+  if (sessionState[TELEGRAM_WORKER_SESSION_KEY] === true) {
+    return scheduleTelegramMonitorAlarm();
+  }
+
+  await sessionStorage.set({ [TELEGRAM_WORKER_SESSION_KEY]: true });
+  return scheduleTelegramMonitorForLifecycle({ checkImmediately: true });
+}
 
 function scheduleTelegramMonitorForLifecycle({ checkImmediately = false } = {}) {
   return chrome.storage.local.get({ telegramOfflineMessageSyncEnabled: true })
@@ -24,7 +44,7 @@ chrome.runtime.onInstalled.addListener((details) => {
       discardLegacyStorage();
       scheduleLuckyNotificationAlarmSync();
       scheduleProfileRetentionPrune();
-      scheduleTelegramMonitorForLifecycle({ checkImmediately: details?.reason === "update" });
+      scheduleTelegramMonitorAlarm();
       scheduleAutoAttendanceAlarm();
     });
 });
@@ -32,7 +52,7 @@ chrome.runtime.onStartup.addListener(() => {
   discardLegacyStorage();
   scheduleLuckyNotificationAlarmSync();
   scheduleProfileRetentionPrune();
-  scheduleTelegramMonitorForLifecycle({ checkImmediately: true });
+  scheduleTelegramMonitorAlarm();
   scheduleAutoAttendanceAlarm();
 });
 

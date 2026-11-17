@@ -181,7 +181,11 @@ test("avatar hover shows cached profile overview without a management-record ent
     await expect(popup).toContainText("1,164");
     await expect(popup.locator(".nsh-profile-home-tabs")).toHaveCount(0);
     await expect(popup.locator("a[href*='/space/123']")).toHaveCount(1);
-    await expect(popup.locator(".nsh-profile-user-action-button")).toHaveCount(2);
+    await expect(popup.locator(".nsh-profile-user-action-button")).toHaveCount(3);
+    await expect(popup.locator(".nsh-profile-message-button")).toHaveAttribute(
+      "href",
+      "/notification#/message?mode=talk&to=123"
+    );
     const nameLink = popup.locator(".nsh-profile-home-name-link");
     await expect(nameLink).toHaveAttribute("href", "/space/123");
     await expect(nameLink).toHaveAttribute("target", "_blank");

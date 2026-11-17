@@ -181,6 +181,8 @@ async function saveOptions(event) {
   event?.preventDefault();
   window.clearTimeout(optionsAutoSaveTimer);
   optionsAutoSaveTimer = 0;
+  const previousOptionsSignature = lastStoredOptionsSignature;
+  const previousIgnoredSignature = ignoredExternalOptionsSignature;
 
   try {
     const options = {
@@ -225,11 +227,16 @@ async function saveOptions(event) {
       levelColors: readLevelColorsFromForm()
     };
 
+    // storage.onChanged can run before the save finishes. Mark this snapshot
+    // first so the page does not mistake its own write for an external edit.
+    rememberOptionsSnapshot(normalizeStoredOptions(options));
     await chrome.storage.local.set(options);
     rememberOptionsSnapshot(await readStoredOptions());
     optionsDirty = false;
     showToast("保存成功");
   } catch (error) {
+    lastStoredOptionsSignature = previousOptionsSignature;
+    ignoredExternalOptionsSignature = previousIgnoredSignature;
     showToast(formatToastError(error, "保存失败"), "error");
   }
 }

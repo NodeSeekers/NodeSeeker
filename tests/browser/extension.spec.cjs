@@ -17,9 +17,24 @@ test("extension loads, saves settings, and communicates with its background", as
         `--load-extension=${extension}`
       ]
     });
+    await context.route("https://api.telegram.org/**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, result: { id: 1, is_bot: true, first_name: "Test", username: "test_bot" } })
+    }));
     const worker = context.serviceWorkers()[0]
       || await context.waitForEvent("serviceworker");
     const extensionId = new URL(worker.url()).host;
+    const hasPreloadedConfig = await worker.evaluate(async () => {
+      const response = await fetch(chrome.runtime.getURL("nsh-preloaded-config.json"));
+      return response.ok;
+    });
+    if (hasPreloadedConfig) {
+      await expect.poll(() => worker.evaluate(async () => {
+        const state = await chrome.storage.local.get("nshPreloadedConfigImported");
+        return state.nshPreloadedConfigImported === true;
+      })).toBe(true);
+    }
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -27,14 +42,26 @@ test("extension loads, saves settings, and communicates with its background", as
     await page.waitForFunction(() => {
       return document.querySelector("#followKeywordGroups")?.children.length > 0;
     });
+    await page.waitForFunction(() => Boolean(lastStoredOptionsSignature));
     await expect(page.locator("#profileLabelSize")).toHaveValue("standard");
     await expect(page.locator("#autoAttendanceEnabled")).not.toBeChecked();
     await expect(page.locator("#profileHoverSignatureEnabled")).toBeChecked();
     await expect(page.locator("#profileHoverTrendEnabled")).not.toBeChecked();
-    const expectedReplyShortcut = await page.evaluate(() => detectShortcutPlatform() === "mac" ? "Command+Enter" : "Ctrl+Enter");
+    const expectedReplyShortcut = await page.evaluate(async () => {
+      const options = await readStoredOptions();
+      return formatShortcutForDisplay(options.replySubmitShortcut);
+    });
     await expect(page.locator("#replySubmitShortcut")).toHaveValue(expectedReplyShortcut);
     await page.locator("label.quick-page-option").filter({ hasText: "悬停时显示用户趋势图" }).click();
     await page.locator("#profileLabelSize").selectOption("small");
+    await expect.poll(() => worker.evaluate(async () => {
+      const state = await chrome.storage.local.get(["profileLabelSize", "profileHoverTrendEnabled"]);
+      return [state.profileLabelSize, state.profileHoverTrendEnabled];
+    })).toEqual(["small", true]);
+    await page.waitForFunction(() => {
+      return !optionsDirty && !optionsAutoSaveTimer && !optionsSyncTimer && !optionsSyncInProgress && !optionsSyncPending;
+    });
+    await expect(page.locator("#confirmDialog")).toBeHidden();
     await page.locator('[data-panel-target="auto-page-panel"]').click();
     await page.locator("#autoAttendanceMode").selectOption("fixed");
     await expect.poll(() => worker.evaluate(async () => {
@@ -192,7 +219,7 @@ test("extension loads, saves settings, and communicates with its background", as
     await page.locator('[data-panel-target="telegram-panel"]').click();
     const targetToggle = page.locator("#telegramTargetList [data-telegram-target-enabled]").first();
     await expect(targetToggle).toBeChecked();
-    await targetToggle.uncheck();
+    await page.locator("#telegramTargetList .telegram-target-toggle").first().click();
     await expect.poll(() => worker.evaluate(async () => {
       const state = await chrome.storage.local.get("telegramTargets");
       return state.telegramTargets?.[0]?.enabled;
@@ -201,7 +228,7 @@ test("extension loads, saves settings, and communicates with its background", as
     await page.reload();
     await page.locator('[data-panel-target="telegram-panel"]').click();
     await expect(page.locator("#telegramTargetList [data-telegram-target-enabled]").first()).not.toBeChecked();
-    await page.locator("#telegramTargetList [data-telegram-target-enabled]").first().check();
+    await page.locator("#telegramTargetList .telegram-target-toggle").first().click();
     await expect.poll(() => worker.evaluate(async () => {
       const state = await chrome.storage.local.get("telegramTargets");
       return state.telegramTargets?.[0]?.enabled;

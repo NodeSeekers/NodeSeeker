@@ -465,6 +465,7 @@ test("long-poll /start update fills Chat ID, replies, and stops its alarm", asyn
     telegramPersonalStartWatchSince: startTime
   };
   const sentReplies = [];
+  const settingsEntries = [];
   const runtimeMessages = [];
   let clearedAlarm = "";
   const sandbox = createSandbox();
@@ -485,6 +486,7 @@ test("long-poll /start update fills Chat ID, replies, and stops its alarm", asyn
     runtime: { sendMessage: async (message) => runtimeMessages.push(message) }
   };
   sandbox.sendTelegramMessage = async (...args) => sentReplies.push(args);
+  sandbox.ensureTelegramSettingsEntry = async (...args) => settingsEntries.push(args);
 
   await vm.runInContext(`processTelegramPersonalStartUpdateIfWatching("123456:secret", [{
     update_id: 91,
@@ -500,8 +502,8 @@ test("long-poll /start update fills Chat ID, replies, and stops its alarm", asyn
   expect(stored.telegramPendingPersonalChatId).toBeUndefined();
   expect(stored.telegramPersonalStartWatchUntil).toBe(0);
   expect(clearedAlarm).toBe("nshTelegram:personal-start");
-  expect(sentReplies[0].slice(0, 2)).toEqual(["123456:secret", { type: "personal", chatId: "222" }]);
-  expect(sentReplies[0][2]).toBe("设置成功，请返回插件查看");
+  expect(settingsEntries).toEqual([["123456:secret", "222"]]);
+  expect(sentReplies).toHaveLength(0);
   expect(runtimeMessages).toContainEqual(expect.objectContaining({
     type: "telegram:personalChatIdDetected",
     chatId: "222",
@@ -518,6 +520,7 @@ test("long polling advances its offset across full batches before a new /start u
   };
   const requests = [];
   const replies = [];
+  const settingsEntries = [];
   const sandbox = createSandbox(async (url) => {
     requests.push(url);
     const updates = requests.length === 1
@@ -533,6 +536,8 @@ test("long polling advances its offset across full batches before a new /start u
   });
   sandbox.cacheTelegramDirectTopicUpdates = async () => {};
   sandbox.processTelegramManagedTopicUpdates = async () => {};
+  sandbox.processTelegramSettingsUpdates = async () => {};
+  sandbox.ensureTelegramSettingsEntry = async (...args) => settingsEntries.push(args);
   sandbox.chrome = {
     storage: { local: {
       get: async (query) => typeof query === "string"
@@ -547,12 +552,17 @@ test("long polling advances its offset across full batches before a new /start u
     runtime: { sendMessage: async () => {} }
   };
   sandbox.sendTelegramMessage = async (...args) => replies.push(args);
+  sandbox.processTelegramPersonalStartUpdateIfWatching = async (token, updates) => {
+    const update = updates.find((item) => item.message?.text === "/start");
+    if (update) await sandbox.registerTelegramPersonalStartUpdate(token, update);
+  };
 
   await vm.runInContext('getTelegramUpdatesAndProcess("123456:secret")', sandbox);
   await vm.runInContext('getTelegramUpdatesAndProcess("123456:secret")', sandbox);
 
-  expect(requests).toHaveLength(2);
-  expect(requests[1]).toContain("offset=101");
+  const updateRequests = requests.filter((url) => url.includes("/getUpdates?"));
+  expect(updateRequests).toHaveLength(2);
+  expect(updateRequests[1]).toContain("offset=101");
   expect(stored.telegramTargets).toEqual([expect.objectContaining({
     type: "personal",
     chatId: "222",
@@ -560,11 +570,63 @@ test("long polling advances its offset across full batches before a new /start u
   })]);
   expect(stored.telegramPendingPersonalChatId).toBeUndefined();
   expect(stored.telegramPersonalStartOffset).toBe(102);
-  expect(replies).toHaveLength(1);
+  expect(settingsEntries).toEqual([["123456:secret", "222"]]);
+  expect(replies).toHaveLength(0);
+});
+
+test("Telegram private-topic updates are processed when the supplied token is absent from stored settings", async () => {
+  const stored = {
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageNotificationsEnabled: true,
+    telegramPostNotificationsEnabled: false,
+    telegramMentionNotificationsEnabled: false,
+    telegramReplyNotificationsEnabled: false,
+    telegramMonitorPaused: false
+  };
+  const updates = [{ update_id: 41, message: { text: "reply" } }];
+  const processed = [];
+  let requestedDefaults = null;
+  const sandbox = createSandbox(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ok: true, result: updates })
+  }));
+  sandbox.cacheTelegramDirectTopicUpdates = async () => {};
+  sandbox.processTelegramDeletedTopicUpdates = async () => {};
+  sandbox.processTelegramManagedTopicUpdates = async (token, batch) => processed.push({ token, batch });
+  sandbox.processTelegramPersonalStartUpdateIfWatching = async () => {};
+  sandbox.processTelegramSettingsUpdates = async () => {};
+  sandbox.chrome = {
+    storage: { local: {
+      get: async (defaults) => {
+        requestedDefaults = defaults;
+        return Object.fromEntries(Object.entries(defaults).map(([key, value]) => [
+          key,
+          Object.hasOwn(stored, key) ? stored[key] : value
+        ]));
+      },
+      set: async (values) => Object.assign(stored, values)
+    } },
+    runtime: { sendMessage: async () => {} }
+  };
+
+  await vm.runInContext('getTelegramUpdatesAndProcess("123456:secret")', sandbox);
+
+  expect(requestedDefaults).toHaveProperty("telegramBotToken", "123456:secret");
+  expect(processed).toEqual([{ token: "123456:secret", batch: updates }]);
+  expect(stored.telegramPersonalStartOffset).toBe(42);
 });
 
 test("failed Topic replies retry the same Telegram update with persisted backoff", async () => {
-  const stored = { telegramBotToken: "123456:secret" };
+  const stored = {
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageNotificationsEnabled: true,
+    telegramPostNotificationsEnabled: false,
+    telegramMentionNotificationsEnabled: false,
+    telegramReplyNotificationsEnabled: false,
+    telegramMonitorPaused: false
+  };
   const requestOffsets = [];
   const scheduledDelays = [];
   let shouldRun = true;

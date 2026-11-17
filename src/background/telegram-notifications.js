@@ -2232,6 +2232,7 @@ async function getTelegramUpdatesAndProcess(
   telegramUpdatesCheckInFlight = true;
   try {
     const state = await chrome.storage.local.get({
+      [TELEGRAM_KEYS.token]: token,
       [TELEGRAM_PERSONAL_START_OFFSET_KEY]: 0,
       [TELEGRAM_KEYS.targets]: [],
       [TELEGRAM_KEYS.messagesEnabled]: true,
@@ -2755,6 +2756,7 @@ async function ensureTelegramSettingsReplyKeyboard(tokenValue, chatIdValue, topi
     chat_id: chatId,
     message_thread_id: Number(topic.topicId),
     text: "点击下方“打开设置”查看静音和对话管理。",
+    disable_notification: await shouldSendTelegramSilently(),
     reply_markup: {
       keyboard: [[{ text: "打开设置" }]],
       resize_keyboard: true,
@@ -2796,6 +2798,7 @@ async function removeTelegramSettingsReplyKeyboard(tokenValue, chatIdValue, topi
   const payload = {
     chat_id: chatId,
     text: "设置入口已移到聊天菜单。",
+    disable_notification: await shouldSendTelegramSilently(),
     reply_markup: { remove_keyboard: true }
   };
   if (/^\d+$/.test(threadId)) payload.message_thread_id = Number(threadId);
