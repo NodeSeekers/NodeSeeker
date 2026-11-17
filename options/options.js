@@ -140,6 +140,9 @@ async function restoreTelegramConfig() {
     telegramPostNotificationsEnabled: true,
     telegramMentionNotificationsEnabled: null,
     telegramReplyNotificationsEnabled: null,
+    telegramSystemFollowNotificationsEnabled: false,
+    telegramSystemFeedNotificationsEnabled: true,
+    telegramSystemLikeNotificationsEnabled: true,
     telegramMentionReplyNotificationsEnabled: null,
     telegramMonitorIntervalSeconds: 30,
     telegramOfflineMessageSyncEnabled: true,
@@ -208,6 +211,9 @@ async function restoreTelegramConfig() {
   document.querySelector("#telegramPostNotificationsEnabled").checked = config.telegramPostNotificationsEnabled;
   document.querySelector("#telegramMentionNotificationsEnabled").checked = mentionNotificationsEnabled;
   document.querySelector("#telegramReplyNotificationsEnabled").checked = replyNotificationsEnabled;
+  document.querySelector("#telegramSystemFollowNotificationsEnabled").checked = config.telegramSystemFollowNotificationsEnabled;
+  document.querySelector("#telegramSystemFeedNotificationsEnabled").checked = config.telegramSystemFeedNotificationsEnabled;
+  document.querySelector("#telegramSystemLikeNotificationsEnabled").checked = config.telegramSystemLikeNotificationsEnabled;
   const monitorIntervalSeconds = Number(config.telegramMonitorIntervalSeconds);
   document.querySelector("#telegramMonitorIntervalSeconds").value =
     [10, 30, 60, 300, 900].includes(monitorIntervalSeconds) ? String(monitorIntervalSeconds) : "30";
@@ -249,6 +255,9 @@ document.querySelector("#telegramMessageNotificationsEnabled").addEventListener(
 document.querySelector("#telegramPostNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramMentionNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramReplyNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
+document.querySelector("#telegramSystemFollowNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
+document.querySelector("#telegramSystemFeedNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
+document.querySelector("#telegramSystemLikeNotificationsEnabled").addEventListener("change", scheduleTelegramConfigSave);
 document.querySelector("#telegramMonitorIntervalSeconds").addEventListener("change", saveTelegramMonitorInterval);
 document.querySelector("#toggleTelegramOfflineMessageSync").addEventListener("click", toggleTelegramOfflineMessageSync);
 document.querySelector("#toggleTelegramSilentPush").addEventListener("click", toggleTelegramSilentPush);
@@ -432,6 +441,9 @@ async function saveTelegramConfig({ silent = false } = {}) {
   const postsEnabled = document.querySelector("#telegramPostNotificationsEnabled").checked;
   const mentionEnabled = document.querySelector("#telegramMentionNotificationsEnabled").checked;
   const replyEnabled = document.querySelector("#telegramReplyNotificationsEnabled").checked;
+  const systemFollowEnabled = document.querySelector("#telegramSystemFollowNotificationsEnabled").checked;
+  const systemFeedEnabled = document.querySelector("#telegramSystemFeedNotificationsEnabled").checked;
+  const systemLikeEnabled = document.querySelector("#telegramSystemLikeNotificationsEnabled").checked;
   const token = document.querySelector("#telegramBotToken").value.trim();
   if (token && (telegramTokenValidationState !== "valid" || token !== telegramValidatedToken)) {
     if (!silent) showToast("请先验证 Bot Token", "error");
@@ -443,6 +455,9 @@ async function saveTelegramConfig({ silent = false } = {}) {
       telegramPostNotificationsEnabled: postsEnabled,
       telegramMentionNotificationsEnabled: mentionEnabled,
       telegramReplyNotificationsEnabled: replyEnabled,
+      telegramSystemFollowNotificationsEnabled: systemFollowEnabled,
+      telegramSystemFeedNotificationsEnabled: systemFeedEnabled,
+      telegramSystemLikeNotificationsEnabled: systemLikeEnabled,
       telegramBotToken: token,
       telegramTargets,
       telegramKeywordRules,
@@ -1340,6 +1355,7 @@ async function resetTelegramConfig() {
   const telegramKeys = [
     "telegramMessageNotificationsEnabled", "telegramPostNotificationsEnabled",
     "telegramMentionNotificationsEnabled", "telegramReplyNotificationsEnabled", "telegramMentionReplyNotificationsEnabled",
+    "telegramSystemFollowNotificationsEnabled", "telegramSystemFeedNotificationsEnabled", "telegramSystemLikeNotificationsEnabled",
     "telegramMonitorIntervalSeconds", "telegramRssMonitorIntervalSeconds",
     "telegramOfflineMessageSyncEnabled",
     "telegramSilentPushEnabled",
@@ -1368,6 +1384,9 @@ async function resetTelegramConfig() {
     document.querySelector("#telegramPostNotificationsEnabled").checked = true;
     document.querySelector("#telegramMentionNotificationsEnabled").checked = false;
     document.querySelector("#telegramReplyNotificationsEnabled").checked = false;
+    document.querySelector("#telegramSystemFollowNotificationsEnabled").checked = false;
+    document.querySelector("#telegramSystemFeedNotificationsEnabled").checked = true;
+    document.querySelector("#telegramSystemLikeNotificationsEnabled").checked = true;
     document.querySelector("#telegramMonitorIntervalSeconds").value = "30";
     renderTelegramOfflineMessageSync({ telegramOfflineMessageSyncEnabled: true });
     renderTelegramSilentPush({ telegramSilentPushEnabled: false });

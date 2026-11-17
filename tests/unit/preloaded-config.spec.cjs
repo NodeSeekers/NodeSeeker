@@ -70,3 +70,18 @@ test("bundled config fills missing settings without overwriting saved values", a
   expect(storage.telegramTargets).toEqual([{ type: "direct", chatId: "-1001", topicId: "12" }]);
   expect(storage.nshPreloadedConfigImported).toBe(true);
 });
+
+test("first-install config seeds every listed option, including system notification defaults", async () => {
+  const payload = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../examples/nsh-preloaded-config.json"), "utf8"));
+  const { sandbox, storage } = createPreloadedConfigSandbox({ payload });
+
+  const imported = await vm.runInContext("importPreloadedConfiguration()", sandbox);
+
+  expect(imported).toBe(true);
+  expect(storage.telegramSystemFollowNotificationsEnabled).toBe(false);
+  expect(storage.telegramSystemFeedNotificationsEnabled).toBe(true);
+  expect(storage.telegramSystemLikeNotificationsEnabled).toBe(true);
+  for (const [key, value] of Object.entries(payload.options)) {
+    expect(storage[key], `preloaded option ${key}`).toEqual(value);
+  }
+});

@@ -30,12 +30,18 @@ test("configuration backups include editable Telegram settings", () => {
   const defaults = vm.runInContext("SYNC_CONFIG_DEFAULTS", sandbox);
   expect(defaults.telegramMessageNotificationsEnabled).toBe(true);
   expect(defaults.telegramPostNotificationsEnabled).toBe(true);
+  expect(defaults.telegramSystemFollowNotificationsEnabled).toBe(false);
+  expect(defaults.telegramSystemFeedNotificationsEnabled).toBe(true);
+  expect(defaults.telegramSystemLikeNotificationsEnabled).toBe(true);
   expect(defaults.telegramOfflineMessageSyncEnabled).toBe(true);
   expect(defaults.telegramSilentPushEnabled).toBe(false);
   expect(Object.keys(defaults)).toEqual(expect.arrayContaining([
     "followRules",
     "telegramMessageNotificationsEnabled",
     "telegramPostNotificationsEnabled",
+    "telegramSystemFollowNotificationsEnabled",
+    "telegramSystemFeedNotificationsEnabled",
+    "telegramSystemLikeNotificationsEnabled",
     "telegramOfflineMessageSyncEnabled",
     "telegramSilentPushEnabled",
     "telegramMonitorPaused",
@@ -90,6 +96,9 @@ test("configuration import and export preserve content and RSS match settings", 
   const matchSettings = {
     telegramMessageNotificationsEnabled: true,
     telegramPostNotificationsEnabled: false,
+    telegramSystemFollowNotificationsEnabled: true,
+    telegramSystemFeedNotificationsEnabled: false,
+    telegramSystemLikeNotificationsEnabled: true,
     telegramMonitorPaused: true,
     telegramBotToken: "test-token",
     telegramTargets: [{
@@ -154,6 +163,9 @@ test("configuration import and export preserve content and RSS match settings", 
   expect(imported.telegramTargets).toEqual(matchSettings.telegramTargets);
   expect(imported.telegramTargets[0].enabled).toBe(false);
   expect(imported.telegramMonitorPaused).toBe(true);
+  expect(imported.telegramSystemFollowNotificationsEnabled).toBe(true);
+  expect(imported.telegramSystemFeedNotificationsEnabled).toBe(false);
+  expect(imported.telegramSystemLikeNotificationsEnabled).toBe(true);
   expect(imported.telegramBlockedKeywords).toEqual(matchSettings.telegramBlockedKeywords);
   expect(imported.telegramBoardSlugs).toEqual(matchSettings.telegramBoardSlugs);
 });

@@ -5,6 +5,9 @@ const TELEGRAM_KEYS = {
   postsEnabled: "telegramPostNotificationsEnabled",
   mentionEnabled: "telegramMentionNotificationsEnabled",
   replyEnabled: "telegramReplyNotificationsEnabled",
+  systemFollowEnabled: "telegramSystemFollowNotificationsEnabled",
+  systemFeedEnabled: "telegramSystemFeedNotificationsEnabled",
+  systemLikeEnabled: "telegramSystemLikeNotificationsEnabled",
   keywords: "telegramKeywordRules",
   blockedKeywords: "telegramBlockedKeywords",
   boards: "telegramBoardSlugs",
@@ -52,6 +55,11 @@ const TELEGRAM_TOPIC_STYLES = Object.freeze({
   reply: Object.freeze({ name: "回复", iconCustomEmojiId: "5417915203100613993", iconColor: 13338331 }),
   settings: Object.freeze({ name: "Settings", iconCustomEmojiId: "5350554349074391003", iconColor: 7322096 }),
   dm: Object.freeze({ name: "", iconColor: 7322096 })
+});
+const TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS = Object.freeze({
+  follow: false,
+  feed: true,
+  like: true
 });
 const TELEGRAM_DM_TOPIC_ICONS = Object.freeze([
   Object.freeze({ emoji: "🔥", customEmojiId: "5312241539987020022" }),
@@ -258,6 +266,9 @@ async function scheduleTelegramMonitorAlarm(
     [TELEGRAM_KEYS.postsEnabled]: true,
     [TELEGRAM_KEYS.mentionEnabled]: null,
     [TELEGRAM_KEYS.replyEnabled]: null,
+    [TELEGRAM_KEYS.systemFollowEnabled]: false,
+    [TELEGRAM_KEYS.systemFeedEnabled]: true,
+    [TELEGRAM_KEYS.systemLikeEnabled]: true,
     [TELEGRAM_KEYS.managedTopics]: [],
     [TELEGRAM_KEYS.outgoingMessageEchoes]: [],
     [TELEGRAM_KEYS.outgoingReadStatuses]: {},
@@ -394,6 +405,9 @@ function isTelegramMonitorReady(config) {
       || config[TELEGRAM_KEYS.postsEnabled]
       || mentionEnabled
       || replyEnabled
+      || isTelegramSystemNotificationCategoryEnabled(config, "follow")
+      || isTelegramSystemNotificationCategoryEnabled(config, "feed")
+      || isTelegramSystemNotificationCategoryEnabled(config, "like")
       || (Array.isArray(config[TELEGRAM_KEYS.managedTopics]) && config[TELEGRAM_KEYS.managedTopics].length > 0));
 }
 
@@ -402,7 +416,39 @@ function isTelegramNodeSeekMonitorReady(config) {
     && (config[TELEGRAM_KEYS.messagesEnabled]
       || config[TELEGRAM_KEYS.mentionEnabled]
       || config[TELEGRAM_KEYS.replyEnabled]
+      || isTelegramSystemNotificationCategoryEnabled(config, "follow")
+      || isTelegramSystemNotificationCategoryEnabled(config, "feed")
+      || isTelegramSystemNotificationCategoryEnabled(config, "like")
       || hasPendingTelegramOutgoingReadTracking(config));
+}
+
+function isTelegramMessageMonitorReady(config) {
+  return isTelegramMonitorReady(config)
+    && (config[TELEGRAM_KEYS.messagesEnabled]
+      || isTelegramSystemNotificationCategoryEnabled(config, "follow")
+      || isTelegramSystemNotificationCategoryEnabled(config, "feed")
+      || isTelegramSystemNotificationCategoryEnabled(config, "like")
+      || hasPendingTelegramOutgoingReadTracking(config));
+}
+
+function isTelegramSystemNotificationCategoryEnabled(config, category) {
+  const key = {
+    follow: TELEGRAM_KEYS.systemFollowEnabled,
+    feed: TELEGRAM_KEYS.systemFeedEnabled,
+    like: TELEGRAM_KEYS.systemLikeEnabled
+  }[category];
+  if (!key) return false;
+  return typeof config[key] === "boolean"
+    ? config[key]
+    : TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS[category];
+}
+
+function getTelegramSystemNotificationCategory(content) {
+  const text = String(content || "");
+  if (text.includes("关注的用户")) return "follow";
+  if (text.includes("投喂")) return "feed";
+  if (text.includes("点赞")) return "like";
+  return "";
 }
 
 function hasPendingTelegramOutgoingReadTracking(config) {
@@ -447,6 +493,9 @@ async function ensureTelegramUpdatesLongPoll() {
     [TELEGRAM_KEYS.postsEnabled]: true,
     [TELEGRAM_KEYS.mentionEnabled]: false,
     [TELEGRAM_KEYS.replyEnabled]: false,
+    [TELEGRAM_KEYS.systemFollowEnabled]: false,
+    [TELEGRAM_KEYS.systemFeedEnabled]: true,
+    [TELEGRAM_KEYS.systemLikeEnabled]: true,
     [TELEGRAM_KEYS.managedTopics]: [],
     telegramMentionReplyNotificationsEnabled: false,
     [TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]: 0,
@@ -488,6 +537,9 @@ async function runTelegramUpdatesLongPoll() {
         [TELEGRAM_KEYS.postsEnabled]: true,
         [TELEGRAM_KEYS.mentionEnabled]: false,
         [TELEGRAM_KEYS.replyEnabled]: false,
+        [TELEGRAM_KEYS.systemFollowEnabled]: false,
+        [TELEGRAM_KEYS.systemFeedEnabled]: true,
+        [TELEGRAM_KEYS.systemLikeEnabled]: true,
         [TELEGRAM_KEYS.managedTopics]: [],
         telegramMentionReplyNotificationsEnabled: false,
         [TELEGRAM_PERSONAL_START_WATCH_UNTIL_KEY]: 0,
@@ -615,6 +667,9 @@ function getTelegramBaselineResetOptions(changes, currentConfig) {
     [TELEGRAM_KEYS.managedTopics]: [],
     [TELEGRAM_KEYS.mentionEnabled]: false,
     [TELEGRAM_KEYS.replyEnabled]: false,
+    [TELEGRAM_KEYS.systemFollowEnabled]: TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS.follow,
+    [TELEGRAM_KEYS.systemFeedEnabled]: TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS.feed,
+    [TELEGRAM_KEYS.systemLikeEnabled]: TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS.like,
     telegramMentionReplyNotificationsEnabled: null,
     [TELEGRAM_KEYS.paused]: false
   };
@@ -625,8 +680,11 @@ function getTelegramBaselineResetOptions(changes, currentConfig) {
     }
   }
   const monitorBecameReady = !isTelegramMonitorReady(previousConfig) && isTelegramMonitorReady(currentConfig);
+  const messageMonitorBecameReady = !isTelegramMessageMonitorReady(previousConfig)
+    && isTelegramMessageMonitorReady(currentConfig);
   return {
-    resetMessageBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.messagesEnabled]?.newValue === true,
+    resetMessageBaseline: monitorBecameReady || messageMonitorBecameReady
+      || changes[TELEGRAM_KEYS.messagesEnabled]?.newValue === true,
     resetPostBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.postsEnabled]?.newValue === true,
     resetMentionBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.mentionEnabled]?.newValue === true,
     resetReplyBaseline: monitorBecameReady || changes[TELEGRAM_KEYS.replyEnabled]?.newValue === true
@@ -643,6 +701,9 @@ async function checkTelegramNotifications() {
       [TELEGRAM_KEYS.messagesEnabled]: true,
       [TELEGRAM_KEYS.mentionEnabled]: false,
       [TELEGRAM_KEYS.replyEnabled]: false,
+      [TELEGRAM_KEYS.systemFollowEnabled]: TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS.follow,
+      [TELEGRAM_KEYS.systemFeedEnabled]: TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS.feed,
+      [TELEGRAM_KEYS.systemLikeEnabled]: TELEGRAM_SYSTEM_NOTIFICATION_DEFAULTS.like,
       [TELEGRAM_KEYS.keywords]: [],
       [TELEGRAM_KEYS.blockedKeywords]: [],
       [TELEGRAM_KEYS.boards]: [],
@@ -658,7 +719,9 @@ async function checkTelegramNotifications() {
 
     const errors = [];
     const hasPendingReadTracking = hasPendingTelegramOutgoingReadTracking(config);
-    if (config[TELEGRAM_KEYS.messagesEnabled] || hasPendingReadTracking) {
+    const hasEnabledSystemNotificationCategory = ["follow", "feed", "like"]
+      .some((category) => isTelegramSystemNotificationCategoryEnabled(config, category));
+    if (config[TELEGRAM_KEYS.messagesEnabled] || hasEnabledSystemNotificationCategory || hasPendingReadTracking) {
       try {
         await checkForNewNodeSeekMessages(config, {
           allowUnmatchedOutgoing: config[TELEGRAM_KEYS.messagesEnabled] === true,
@@ -852,11 +915,6 @@ async function checkForNewNodeSeekMessages(config, {
             continue;
           }
         }
-        if (isIncoming && !allowIncoming) {
-          nextCursors[conversationId] = String(incomingMessage.id);
-          await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
-          continue;
-        }
         const peerName = String(isOutgoing
           ? incomingMessage.receiver_name || message.receiver_name || knownTopic?.name
           : incomingMessage.sender_name
@@ -866,10 +924,20 @@ async function checkForNewNodeSeekMessages(config, {
           || peerName === "系统通知"
           || String(message.sender_name || "").trim() === "系统通知"
           || String(message.receiver_name || "").trim() === "系统通知";
+        const systemNotificationCategory = isSystemNotification && isIncoming
+          ? getTelegramSystemNotificationCategory(incomingMessage.content)
+          : "";
+        const categoryEnabled = systemNotificationCategory
+          ? isTelegramSystemNotificationCategoryEnabled(config, systemNotificationCategory)
+          : allowIncoming;
+        if (isIncoming && !categoryEnabled) {
+          nextCursors[conversationId] = String(incomingMessage.id);
+          await chrome.storage.local.set({ [TELEGRAM_KEYS.messageCursors]: nextCursors });
+          continue;
+        }
         const messageContent = extractTelegramMessageMedia(incomingMessage.content);
         const messageBody = messageContent.text || (messageContent.imageUrls.length ? "" : "（消息没有文本内容）");
-        const isFollowedUserPost = isSystemNotification && isIncoming
-          && String(incomingMessage.content || "").includes("关注的用户");
+        const isFollowedUserPost = systemNotificationCategory === "follow";
         const originalPost = isFollowedUserPost
           ? await fetchTelegramSystemNotificationPostContent(incomingMessage.content)
           : null;

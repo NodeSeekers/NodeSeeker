@@ -989,7 +989,7 @@ test("activity extraction failure does not send incomplete alerts or advance the
 test("followed-post extraction failure keeps the private-message cursor for retry", async () => {
   const stored = {
     telegramSystemNotificationUserId: "999",
-    telegramMessageCursors: { "999:777": "1" },
+    telegramMessageCursors: { "777:999": "1" },
     telegramManagedTopics: [{
       id: "system-topic", kind: "system", chatId: "333", topicId: "456",
       nsUserId: "", name: "系统", iconCustomEmojiId: "5309984423003823246"
@@ -1022,12 +1022,103 @@ test("followed-post extraction failure keeps the private-message cursor for retr
   await expect(Promise.resolve(vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify({
     telegramBotToken: "123456:secret",
     telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramSystemFollowNotificationsEnabled: true,
     telegramMessageCursors: stored.telegramMessageCursors,
     telegramManagedTopics: stored.telegramManagedTopics
   })})`, sandbox))).rejects.toThrow("帖子页暂时无法读取");
 
   expect(sent).toHaveLength(0);
-  expect(stored.telegramMessageCursors["999:777"]).toBe("1");
+  expect(stored.telegramMessageCursors["777:999"]).toBe("1");
+});
+
+test("system notification filters default to follow off, feed and like on", () => {
+  const sandbox = createSandbox();
+  expect(vm.runInContext('isTelegramSystemNotificationCategoryEnabled({}, "follow")', sandbox)).toBe(false);
+  expect(vm.runInContext('isTelegramSystemNotificationCategoryEnabled({}, "feed")', sandbox)).toBe(true);
+  expect(vm.runInContext('isTelegramSystemNotificationCategoryEnabled({}, "like")', sandbox)).toBe(true);
+  expect(vm.runInContext('getTelegramSystemNotificationCategory("你关注的用户 Alice 发布了新帖")', sandbox)).toBe("follow");
+  expect(vm.runInContext('getTelegramSystemNotificationCategory("您的评论被用户 Q 投喂鸡腿")', sandbox)).toBe("feed");
+  expect(vm.runInContext('getTelegramSystemNotificationCategory("您的评论被用户 Q 点赞")', sandbox)).toBe("like");
+});
+
+test("enabling a system category resets its baseline when message-list polling was inactive", () => {
+  const sandbox = createSandbox();
+  const change = { telegramSystemFollowNotificationsEnabled: { oldValue: false, newValue: true } };
+  const config = {
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageNotificationsEnabled: false,
+    telegramPostNotificationsEnabled: false,
+    telegramMentionNotificationsEnabled: true,
+    telegramReplyNotificationsEnabled: true,
+    telegramSystemFollowNotificationsEnabled: true,
+    telegramSystemFeedNotificationsEnabled: false,
+    telegramSystemLikeNotificationsEnabled: false,
+    telegramManagedTopics: [{ kind: "system", chatId: "333", topicId: "456" }],
+    telegramMonitorPaused: false
+  };
+  const resumed = vm.runInContext(`getTelegramBaselineResetOptions(${JSON.stringify(change)}, ${JSON.stringify(config)})`, sandbox);
+  expect(resumed).toEqual({
+    resetMessageBaseline: true,
+    resetPostBaseline: false,
+    resetMentionBaseline: false,
+    resetReplyBaseline: false
+  });
+
+  const alreadyPolling = vm.runInContext(`getTelegramBaselineResetOptions(${JSON.stringify(change)}, ${JSON.stringify({
+    ...config, telegramMessageNotificationsEnabled: true
+  })})`, sandbox);
+  expect(alreadyPolling.resetMessageBaseline).toBe(false);
+});
+
+test("system notification filters skip disabled categories and advance their shared cursor", async () => {
+  const stored = {
+    telegramSystemNotificationUserId: "999",
+    telegramMessageCursors: { "777:999": "1" },
+    telegramManagedTopics: [{
+      id: "system-topic", kind: "system", chatId: "333", topicId: "456",
+      nsUserId: "", name: "系统", iconCustomEmojiId: "5309984423003823246"
+    }],
+    telegramOutgoingMessageEchoes: []
+  };
+  const sent = [];
+  const messages = [
+    { id: 2, sender_id: "999", receiver_id: "777", sender_name: "系统通知", content: "你关注的用户 Alice 发布了新帖" },
+    { id: 3, sender_id: "999", receiver_id: "777", sender_name: "系统通知", content: "您的评论被用户 Q 投喂鸡腿" },
+    { id: 4, sender_id: "999", receiver_id: "777", sender_name: "系统通知", content: "您的评论被用户 Q 点赞" }
+  ];
+  const sandbox = createSandbox(async (url) => {
+    if (url.endsWith("/api/notification/message/list")) {
+      return { ok: true, json: async () => ({ success: true, msgArray: [{
+        sender_id: "999", receiver_id: "777", sender_name: "系统通知", max_id: 4
+      }] }) };
+    }
+    if (url.endsWith("/api/notification/message/with/999")) {
+      return { ok: true, json: async () => ({ success: true, msgArray: messages }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+  sandbox.normalizeManagedSystemTopics = async () => {};
+  sandbox.sendTelegramPrivateMessageToTopics = async (...args) => { sent.push(args); };
+
+  await vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify({
+    telegramBotToken: "123456:secret",
+    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
+    telegramMessageCursors: stored.telegramMessageCursors,
+    telegramManagedTopics: stored.telegramManagedTopics
+  })})`, sandbox);
+
+  expect(sent).toHaveLength(2);
+  expect(sent.map((args) => args[3])).toEqual([
+    "您的评论被用户 Q 投喂鸡腿",
+    "您的评论被用户 Q 点赞"
+  ]);
+  expect(stored.telegramMessageCursors["777:999"]).toBe("4");
 });
 
 test("Telegram-originated private reply is not mirrored back to its Telegram topic", async () => {
