@@ -29,6 +29,7 @@ const TELEGRAM_KEYS = {
   pendingTopicImageMarkdowns: "telegramPendingTopicImageMarkdowns",
   pendingTopicReadUserIds: "telegramPendingTopicReadUserIds",
   mentionReplyCursors: "telegramMentionReplyCursors",
+  activityCommentReceipts: "telegramActivityCommentReceipts",
   rssSeenIds: "telegramRssSeenIds",
   rssInitialized: "telegramRssInitialized",
   rssHistory: "telegramRssHistory",
@@ -40,6 +41,7 @@ const TELEGRAM_RSS_URL = "https://rss.nodeseek.com/";
 const TELEGRAM_RSS_HISTORY_LIMIT = 100;
 const TELEGRAM_RSS_SEEN_LIMIT = 500;
 const TELEGRAM_ACTIVITY_CURSOR_LIMIT = 500;
+const TELEGRAM_ACTIVITY_COMMENT_RECEIPT_LIMIT = 1000;
 const TELEGRAM_ACTIVITY_PAGE_LIMIT = 20;
 const TELEGRAM_ACTIVITY_PAGE_SIZE = 10;
 const TELEGRAM_OUTGOING_ECHO_LIMIT = 200;
@@ -1073,8 +1075,18 @@ async function checkForNewNodeSeekActivity(config, kind) {
   const notificationEntries = newEntries.reverse().filter((entry) => {
     return normalizeTelegramActivityId(entry.commenter_id) !== currentUserId;
   });
-  const activityContents = await fetchTelegramActivityCommentContents(notificationEntries);
-  for (const entry of notificationEntries) {
+  // Mention and reply endpoints can report the same comment; the first successful delivery owns it.
+  const commentReceipts = notificationEntries.length > 0
+    ? await getTelegramActivityCommentReceipts()
+    : {};
+  const pendingNotificationEntries = notificationEntries.filter((entry) => {
+    const receiptKey = getTelegramActivityCommentReceiptKey(currentUserId, entry.comment_id);
+    return !receiptKey || !commentReceipts[receiptKey];
+  });
+  const activityContents = await fetchTelegramActivityCommentContents(pendingNotificationEntries);
+  for (const entry of pendingNotificationEntries) {
+    const receiptKey = getTelegramActivityCommentReceiptKey(currentUserId, entry.comment_id);
+    if (receiptKey && commentReceipts[receiptKey]) continue;
     const commentId = normalizeTelegramActivityId(entry.comment_id);
     const extracted = activityContents.get(commentId);
     const content = String(extracted?.reply || entry.content || "");
@@ -1083,6 +1095,10 @@ async function checkForNewNodeSeekActivity(config, kind) {
       quote: extracted?.quote || "",
       content
       }), `activity:${kind}:${normalizeTelegramActivityId(entry?.id)}`);
+    if (receiptKey) {
+      commentReceipts[receiptKey] = Date.now();
+      await saveTelegramActivityCommentReceipts(commentReceipts);
+    }
   }
 
   await saveTelegramActivityCursor(kind, discoveredIds, cursor);
@@ -1098,6 +1114,37 @@ function normalizeTelegramActivityCursor(value) {
 function normalizeTelegramActivityId(value) {
   const id = String(value ?? "").trim();
   return /^\d+$/.test(id) ? id : "";
+}
+
+function getTelegramActivityCommentReceiptKey(userIdValue, commentIdValue) {
+  const userId = normalizeTelegramActivityId(userIdValue);
+  const commentId = normalizeTelegramActivityId(commentIdValue);
+  return userId && commentId ? `${userId}:${commentId}` : "";
+}
+
+function normalizeTelegramActivityCommentReceipts(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key, timestamp]) => /^\d+:\d+$/.test(key)
+      && Number.isFinite(Number(timestamp)) && Number(timestamp) > 0)
+    .sort((left, right) => Number(right[1]) - Number(left[1]))
+    .slice(0, TELEGRAM_ACTIVITY_COMMENT_RECEIPT_LIMIT));
+}
+
+async function getTelegramActivityCommentReceipts() {
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.activityCommentReceipts]: {} });
+  return normalizeTelegramActivityCommentReceipts(stored[TELEGRAM_KEYS.activityCommentReceipts]);
+}
+
+async function saveTelegramActivityCommentReceipts(receiptsValue) {
+  const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.activityCommentReceipts]: {} });
+  const receipts = {
+    ...normalizeTelegramActivityCommentReceipts(stored[TELEGRAM_KEYS.activityCommentReceipts]),
+    ...normalizeTelegramActivityCommentReceipts(receiptsValue)
+  };
+  const retainedReceipts = normalizeTelegramActivityCommentReceipts(receipts);
+  await chrome.storage.local.set({ [TELEGRAM_KEYS.activityCommentReceipts]: retainedReceipts });
+  return retainedReceipts;
 }
 
 async function fetchTelegramActivityCommentContents(entries) {

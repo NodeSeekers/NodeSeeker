@@ -1031,6 +1031,87 @@ test("new mention and reply notifications are delivered even when already read a
   }
 });
 
+test("the first delivered category wins when mention and reply notifications share a comment", async () => {
+  for (const kinds of [["at", "reply"], ["reply", "at"]]) {
+    const entries = {
+      at: { id: 12, comment_id: 301, post_id: 456, floor_id: 11, commenter_id: 99, commenter_name: "Alice", title: "主题", content: "正文" },
+      reply: { id: 13, comment_id: 301, post_id: 456, floor_id: 11, commenter_id: 99, commenter_name: "Alice", title: "主题", content: "正文" }
+    };
+    const stored = {
+      telegramMentionReplyCursors: {
+        at: { initialized: true, ids: [] },
+        reply: { initialized: true, ids: [] }
+      }
+    };
+    const sentKinds = [];
+    const sandbox = createSandbox(async (url) => {
+      const kind = String(url).includes("/at-me/list") ? "at" : "reply";
+      return { ok: true, json: async () => ({ success: true, data: [entries[kind]] }) };
+    });
+    sandbox.chrome = { storage: { local: {
+      get: async (defaults) => ({ ...defaults, ...stored }),
+      set: async (values) => Object.assign(stored, values)
+    } } };
+    sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+    sandbox.fetchTelegramActivityCommentContents = async (comments) => new Map(
+      comments.map((entry) => [String(entry.comment_id), { quote: "", reply: "正文" }])
+    );
+    sandbox.sendTelegramActivityNotification = async (_config, kind) => { sentKinds.push(kind); };
+
+    for (const kind of kinds) {
+      await vm.runInContext(`checkForNewNodeSeekActivity({}, ${JSON.stringify(kind)})`, sandbox);
+    }
+
+    expect(sentKinds).toEqual([kinds[0]]);
+    expect(stored.telegramMentionReplyCursors[kinds[1]].ids).toEqual([String(kinds[1] === "at" ? 12 : 13)]);
+  }
+});
+
+test("a failed first category does not claim the comment or block its counterpart", async () => {
+  const entries = {
+    at: { id: 12, comment_id: 301, post_id: 456, floor_id: 11, commenter_id: 99, commenter_name: "Alice", title: "主题", content: "正文" },
+    reply: { id: 13, comment_id: 301, post_id: 456, floor_id: 11, commenter_id: 99, commenter_name: "Alice", title: "主题", content: "正文" }
+  };
+  const stored = {
+    telegramMentionReplyCursors: {
+      at: { initialized: true, ids: [] },
+      reply: { initialized: true, ids: [] }
+    }
+  };
+  let failMention = true;
+  const sentKinds = [];
+  const sandbox = createSandbox(async (url) => {
+    const kind = String(url).includes("/at-me/list") ? "at" : "reply";
+    return { ok: true, json: async () => ({ success: true, data: [entries[kind]] }) };
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+  sandbox.fetchTelegramActivityCommentContents = async (comments) => new Map(
+    comments.map((entry) => [String(entry.comment_id), { quote: "", reply: "正文" }])
+  );
+  sandbox.sendTelegramActivityNotification = async (_config, kind) => {
+    if (kind === "at" && failMention) {
+      failMention = false;
+      throw new Error("Telegram 暂时失败");
+    }
+    sentKinds.push(kind);
+  };
+
+  await expect(Promise.resolve(vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox)))
+    .rejects.toThrow("Telegram 暂时失败");
+  expect(stored.telegramActivityCommentReceipts).toBeUndefined();
+
+  await vm.runInContext('checkForNewNodeSeekActivity({}, "reply")', sandbox);
+  await vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox);
+
+  expect(sentKinds).toEqual(["reply"]);
+  expect(stored.telegramMentionReplyCursors.at.ids).toEqual(["12"]);
+  expect(stored.telegramMentionReplyCursors.reply.ids).toEqual(["13"]);
+});
+
 test("activity extraction failure does not send incomplete alerts or advance the cursor", async () => {
   const entry = {
     id: 12, comment_id: 301, post_id: 456, floor_id: 11,
