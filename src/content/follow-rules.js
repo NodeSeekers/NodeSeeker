@@ -82,17 +82,29 @@ function normalizeFollowRuleKeywordRules(group, groupId, usedIds) {
       : []);
 
   return savedRules.filter(isFollowRuleObject).map((rule, index) => {
-    const terms = normalizeBlockFilterList(rule.terms);
+    const legacyTerms = normalizeBlockFilterList(rule.terms);
+    const termGroups = normalizeFollowRuleTermGroups(rule.termGroups, legacyTerms, rule.mode);
+    const terms = normalizeBlockFilterList(termGroups.flat());
     if (terms.length === 0) return null;
     const baseId = normalizeFollowRuleText(rule.id) || `${groupId}-rule-${index + 1}`;
     return {
       id: createUniqueFollowRuleId(baseId, usedIds),
       enabled: rule.enabled !== false,
-      mode: normalizeFollowRuleMatchMode(rule.mode, terms.length),
+      mode: "all",
       terms,
+      termGroups,
       excludeTerms: normalizeBlockFilterList(rule.excludeTerms)
     };
   }).filter(Boolean);
+}
+
+function normalizeFollowRuleTermGroups(value, fallbackTerms = [], fallbackMode = "all") {
+  const savedGroups = Array.isArray(value)
+    ? value.map((group) => normalizeBlockFilterList(group)).filter((group) => group.length > 0)
+    : [];
+  if (savedGroups.length > 0) return savedGroups;
+  const terms = normalizeBlockFilterList(fallbackTerms);
+  return fallbackMode === "any" ? (terms.length > 0 ? [terms] : []) : terms.map((term) => [term]);
 }
 
 function normalizeFollowRuleMatchMode(value, itemCount = 0) {
@@ -364,8 +376,9 @@ function createFollowRuleSingleKeywordRule(term) {
       ? crypto.randomUUID()
       : `keyword-rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     enabled: true,
-    mode: "any",
+    mode: "all",
     terms: [term],
+    termGroups: [[term]],
     excludeTerms: []
   };
 }
@@ -844,6 +857,7 @@ function getCompiledFollowRules() {
         rules: group.rules.map((rule) => ({
           ...rule,
           normalizedItems: rule.terms.map((item) => item.toLocaleLowerCase()),
+          normalizedTermGroups: rule.termGroups.map((terms) => terms.map((item) => item.toLocaleLowerCase())),
           normalizedExcludedItems: rule.excludeTerms.map((item) => item.toLocaleLowerCase())
         }))
       })),
@@ -1049,8 +1063,8 @@ function getMatchingFollowRuleKeywordRules(group, normalizedTitle) {
   return group.rules.filter((rule) => {
     if (rule.enabled === false || rule.normalizedItems.length === 0) return false;
     if (rule.normalizedExcludedItems.some((keyword) => keyword && normalizedTitle.includes(keyword))) return false;
-    const checks = rule.normalizedItems.map((keyword) => normalizedTitle.includes(keyword));
-    return rule.mode === "all" ? checks.every(Boolean) : checks.some(Boolean);
+    return rule.normalizedTermGroups.length > 0
+      && rule.normalizedTermGroups.every((terms) => terms.some((keyword) => normalizedTitle.includes(keyword)));
   });
 }
 

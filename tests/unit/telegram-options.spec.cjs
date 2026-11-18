@@ -116,20 +116,64 @@ test("typing a Bot Token schedules automatic validation without a separate butto
   expect(calls.filter((call) => typeof call === "object" && "save" in call)).toHaveLength(0);
 });
 
-test("Telegram keyword inputs split on commas, 和, and whitespace while preserving symbols", () => {
+test("Telegram keyword expression groups alternatives and requires every group", () => {
   const sandbox = vm.createContext({
-    keywordInput: "台湾，家宽 和 + \\ /\nv.ps gen2",
-    excludedInput: "收出,溢价，+ \\ /"
+    keywordInput: "(海创/Hytron),(一折/1折)"
   });
   vm.runInContext([
     extractFunction("parseTelegramKeywordRules"),
-    extractFunction("parseTelegramTextList")
+    extractFunction("parseTelegramKeywordExpression"),
+    extractFunction("flattenTelegramKeywordTermGroups")
   ].join("\n"), sandbox);
 
   const rules = vm.runInContext("parseTelegramKeywordRules(keywordInput)", sandbox);
-  const excludedTerms = vm.runInContext("parseTelegramTextList(excludedInput)", sandbox);
+  expect(JSON.parse(JSON.stringify(rules[0].termGroups)))
+    .toEqual([["海创", "Hytron"], ["一折", "1折"]]);
+  expect(JSON.parse(JSON.stringify(rules[0].terms)))
+    .toEqual(["海创", "Hytron", "一折", "1折"]);
+  expect(vm.runInContext('parseTelegramKeywordExpression("(海创/),1折")', sandbox)).toEqual([]);
+});
 
-  expect(JSON.parse(JSON.stringify(rules.map((rule) => rule.terms))))
-    .toEqual([["台湾", "家宽", "+", "\\", "/"], ["v.ps", "gen2"]]);
-  expect(JSON.parse(JSON.stringify(excludedTerms))).toEqual(["收出", "溢价", "+", "\\", "/"]);
+test("Telegram keyword rule can add and edit grouped alternatives", () => {
+  const keywordInput = { value: "(海创/Hytron),(一折/1折)" };
+  const excludeInput = { value: "出, yt" };
+  const button = { textContent: "添加", title: "" };
+  let id = 0;
+  const sandbox = vm.createContext({
+    crypto: { randomUUID: () => `rule-${++id}` },
+    document: {
+      querySelector: (selector) => selector === "#telegramKeywordInput"
+        ? keywordInput
+        : selector === "#telegramKeywordExcludeInput" ? excludeInput : button
+    },
+    showToast: () => {},
+    telegramKeywordEditingRuleId: ""
+  });
+  vm.runInContext([
+    extractFunction("parseTelegramKeywordRules"),
+    extractFunction("parseTelegramKeywordExpression"),
+    extractFunction("flattenTelegramKeywordTermGroups"),
+    extractFunction("normalizeTelegramKeywordTermGroups"),
+    extractFunction("parseTelegramTextList"),
+    extractFunction("getTelegramKeywordRuleTermGroups"),
+    extractFunction("formatTelegramKeywordExpression"),
+    extractFunction("getTelegramKeywordRuleIdentity"),
+    extractFunction("setTelegramKeywordEditingRule"),
+    extractFunction("addTelegramKeywordRule")
+  ].join("\n"), sandbox);
+  sandbox.telegramKeywordRules = [];
+  sandbox.renderTelegramKeywordRules = () => {};
+  sandbox.persistTelegramKeywordRules = async () => {};
+  vm.runInContext("addTelegramKeywordRule()", sandbox);
+  expect(sandbox.telegramKeywordRules).toHaveLength(1);
+  expect(JSON.parse(JSON.stringify(sandbox.telegramKeywordRules[0].termGroups)))
+    .toEqual([["海创", "Hytron"], ["一折", "1折"]]);
+
+  sandbox.telegramKeywordEditingRuleId = sandbox.telegramKeywordRules[0].id;
+  keywordInput.value = "(海创/Hytron),(五折/5折)";
+  excludeInput.value = "出";
+  vm.runInContext("addTelegramKeywordRule()", sandbox);
+  expect(sandbox.telegramKeywordRules).toHaveLength(1);
+  expect(JSON.parse(JSON.stringify(sandbox.telegramKeywordRules[0].termGroups)))
+    .toEqual([["海创", "Hytron"], ["五折", "5折"]]);
 });

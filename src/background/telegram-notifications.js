@@ -1468,16 +1468,30 @@ function matchTelegramRssPost(post, config) {
 
   const matched = new Set();
   for (const rule of rules) {
-    const terms = rule.terms.map((term) => String(term || "").trim()).filter(Boolean);
+    const termGroups = getTelegramKeywordRuleTermGroups(rule);
     const excludedTerms = Array.isArray(rule.excludeTerms)
       ? rule.excludeTerms.map((term) => String(term || "").trim()).filter(Boolean)
       : [];
     if (excludedTerms.some((term) => text.includes(term.toLocaleLowerCase()))) continue;
-    const checks = terms.map((term) => text.includes(term.toLocaleLowerCase()));
-    const hit = terms.length > 0 && (rule.mode === "all" ? checks.every(Boolean) : checks.some(Boolean));
-    if (hit) terms.forEach((term, index) => { if (checks[index]) matched.add(term); });
+    const checks = termGroups.map((group) => group.filter((term) => text.includes(term.toLocaleLowerCase())));
+    const hit = checks.length > 0 && checks.every((group) => group.length > 0);
+    if (hit) checks.flat().forEach((term) => matched.add(term));
   }
   return [...matched];
+}
+
+function getTelegramKeywordRuleTermGroups(rule) {
+  const savedGroups = Array.isArray(rule?.termGroups)
+    ? rule.termGroups.map((group) => Array.isArray(group)
+      ? [...new Set(group.map((term) => String(term || "").trim()).filter(Boolean))]
+      : []).filter((group) => group.length > 0)
+    : [];
+  if (savedGroups.length > 0) return savedGroups;
+
+  const terms = [...new Set((Array.isArray(rule?.terms) ? rule.terms : [])
+    .map((term) => String(term || "").trim()).filter(Boolean))];
+  if (rule?.mode === "all") return terms.map((term) => [term]);
+  return terms.length > 0 ? [terms] : [];
 }
 
 function resolveTelegramBoardSlug(value) {

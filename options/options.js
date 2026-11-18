@@ -9,6 +9,7 @@ let telegramTokenValidationTimer = 0;
 let telegramTokenValidationRequestId = 0;
 let telegramKeywordRules = [];
 let telegramKeywordEditingRuleId = "";
+let draggedTelegramKeywordRuleId = "";
 let selectedTelegramHistoryKeys = new Set();
 let selectedTelegramManagedTopicIds = new Set();
 form.addEventListener("submit", saveOptions);
@@ -327,11 +328,6 @@ document.querySelector("#addTelegramKeyword").addEventListener("click", addTeleg
 }));
 document.querySelector("#telegramKeywordRuleList").addEventListener("change", handleTelegramKeywordRuleChange);
 document.querySelector("#telegramKeywordRuleList").addEventListener("click", handleTelegramKeywordRuleClick);
-document.querySelector("#selectAllTelegramBoards").addEventListener("click", () => {
-  document.querySelectorAll("[data-telegram-board]").forEach((input) => { input.checked = true; });
-  scheduleTelegramConfigSave();
-});
-
 let telegramConfigSaveTimer = 0;
 
 function handleTelegramBotTokenInput() {
@@ -894,22 +890,100 @@ function closeTelegramDirectTopicMenuOutside(event) {
 }
 
 function parseTelegramKeywordRules(value) {
-  return String(value || "").split(/\r?\n/)
-    .map((line) => line.split(/[,，\s]+|和/g).map((term) => term.trim()).filter(Boolean))
-    .filter((terms) => terms.length > 0)
-    .map((terms) => ({ terms, enabled: true }));
+  const termGroups = parseTelegramKeywordExpression(value);
+  if (termGroups.length === 0) return [];
+  return [{ terms: flattenTelegramKeywordTermGroups(termGroups), termGroups, mode: "all", enabled: true }];
+}
+
+function parseTelegramKeywordExpression(value) {
+  const text = String(value || "").replace(/\s*[\/／]\s*/g, "/").trim();
+  if (!text) return [];
+  const termGroups = [];
+  let current = "";
+  let inParentheses = false;
+  let invalid = false;
+  const addGroup = () => {
+    const expression = current.trim();
+    current = "";
+    if (!expression) return;
+    const terms = expression.split(/[\/／]/).map((term) => term.trim());
+    if (terms.some((term) => !term)) {
+      invalid = true;
+      return;
+    }
+    const seen = new Set();
+    const uniqueTerms = terms.filter((term) => {
+      const key = term.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (uniqueTerms.length > 0) termGroups.push(uniqueTerms);
+  };
+
+  for (const char of text) {
+    if (char === "(") {
+      if (inParentheses || current.trim()) return [];
+      inParentheses = true;
+      continue;
+    }
+    if (char === ")") {
+      if (!inParentheses) return [];
+      inParentheses = false;
+      addGroup();
+      if (invalid) return [];
+      continue;
+    }
+    if (/[,，\s]/.test(char)) {
+      if (inParentheses) return [];
+      addGroup();
+      if (invalid) return [];
+      continue;
+    }
+    current += char;
+  }
+  if (inParentheses) return [];
+  addGroup();
+  return invalid ? [] : termGroups;
+}
+
+function normalizeTelegramKeywordTermGroups(value, fallbackTerms = [], fallbackMode = "all") {
+  const savedGroups = Array.isArray(value)
+    ? value.map((group) => Array.isArray(group)
+      ? [...new Set(group.map((term) => String(term || "").trim()).filter(Boolean))]
+      : []).filter((group) => group.length > 0)
+    : [];
+  if (savedGroups.length > 0) return savedGroups;
+  const terms = [...new Set((Array.isArray(fallbackTerms) ? fallbackTerms : [])
+    .map((term) => String(term || "").trim()).filter(Boolean))];
+  return fallbackMode === "any" ? (terms.length > 0 ? [terms] : []) : terms.map((term) => [term]);
+}
+
+function flattenTelegramKeywordTermGroups(termGroups) {
+  return [...new Set(termGroups.flat())];
+}
+
+function getTelegramKeywordRuleTermGroups(rule) {
+  return normalizeTelegramKeywordTermGroups(rule?.termGroups, rule?.terms, rule?.mode);
+}
+
+function formatTelegramKeywordExpression(rule) {
+  return getTelegramKeywordRuleTermGroups(rule).map((group) => (
+    group.length > 1 ? `(${group.join("/")})` : group[0]
+  )).join(", ");
 }
 
 function normalizeTelegramKeywordRules(value) {
   if (!Array.isArray(value)) return [];
   return value.map((rule) => {
-    const terms = (Array.isArray(rule?.terms) ? rule.terms : [])
-      .map((term) => String(term || "").trim()).filter(Boolean);
+    const termGroups = normalizeTelegramKeywordTermGroups(rule?.termGroups, rule?.terms, rule?.mode);
+    const terms = flattenTelegramKeywordTermGroups(termGroups);
     if (terms.length === 0) return null;
     return {
       id: String(rule.id || crypto.randomUUID()),
       terms,
-      mode: rule.mode === "all" ? "all" : "any",
+      termGroups,
+      mode: "all",
       excludeTerms: parseTelegramTextList(rule.excludeTerms),
       enabled: rule.enabled !== false
     };
@@ -918,14 +992,17 @@ function normalizeTelegramKeywordRules(value) {
 
 function addTelegramKeywordRule() {
   const input = document.querySelector("#telegramKeywordInput");
-  const mode = document.querySelector("#telegramKeywordMode").value === "any" ? "any" : "all";
   const excludeTerms = parseTelegramTextList(document.querySelector("#telegramKeywordExcludeInput").value);
   const additions = parseTelegramKeywordRules(input.value).map((rule) => ({
     ...rule,
-    mode,
     excludeTerms
   }));
-  if (additions.length === 0) return;
+  if (additions.length === 0) {
+    if (input.value.trim()) {
+      showToast("关键词格式不正确：别名请用 / 分隔，括号内表示“或”，不同条件用逗号或空格分开。例如 (NoBrand/NB/NNB), 无限", "error");
+    }
+    return;
+  }
   const editingRule = telegramKeywordRules.find((rule) => rule.id === telegramKeywordEditingRuleId);
   if (editingRule && additions.length !== 1) {
     showToast("编辑时一次只能修改一条规则", "error");
@@ -950,7 +1027,8 @@ function addTelegramKeywordRule() {
     }
     Object.assign(editingRule, {
       terms: additions[0].terms,
-      mode: additions[0].mode,
+      termGroups: additions[0].termGroups,
+      mode: "all",
       excludeTerms: additions[0].excludeTerms
     });
   } else {
@@ -970,9 +1048,8 @@ function addTelegramKeywordRule() {
 
 function setTelegramKeywordEditingRule(rule) {
   telegramKeywordEditingRuleId = rule?.id || "";
-  document.querySelector("#telegramKeywordInput").value = rule?.terms.join(", ") || "";
+  document.querySelector("#telegramKeywordInput").value = rule ? formatTelegramKeywordExpression(rule) : "";
   document.querySelector("#telegramKeywordExcludeInput").value = rule?.excludeTerms.join(", ") || "";
-  document.querySelector("#telegramKeywordMode").value = rule?.mode === "any" ? "any" : "all";
   const button = document.querySelector("#addTelegramKeyword");
   button.textContent = rule ? "修改" : "添加";
   button.title = rule ? "保存对这条规则的修改" : "添加关键词规则";
@@ -980,8 +1057,7 @@ function setTelegramKeywordEditingRule(rule) {
 
 function getTelegramKeywordRuleIdentity(rule) {
   return JSON.stringify({
-    terms: rule.terms.map((term) => term.toLocaleLowerCase()),
-    mode: rule.mode,
+    termGroups: getTelegramKeywordRuleTermGroups(rule).map((group) => group.map((term) => term.toLocaleLowerCase())),
     excludeTerms: rule.excludeTerms.map((term) => term.toLocaleLowerCase())
   });
 }
@@ -993,7 +1069,52 @@ function renderTelegramKeywordRules() {
     const item = document.createElement("li");
     item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}${rule.id === telegramKeywordEditingRuleId ? " is-editing" : ""}`;
     item.dataset.telegramRuleId = rule.id;
-    item.title = "点击卡片编辑规则";
+    item.draggable = true;
+    item.title = "点击卡片编辑规则；拖动卡片调整顺序";
+    item.addEventListener("dragstart", (event) => {
+      if (event.target.closest("button, input, label")) {
+        event.preventDefault();
+        return;
+      }
+      draggedTelegramKeywordRuleId = rule.id;
+      item.classList.add("is-dragging");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", rule.id);
+      }
+    });
+    item.addEventListener("dragend", () => {
+      draggedTelegramKeywordRuleId = "";
+      item.classList.remove("is-dragging", "is-drop-before", "is-drop-after");
+    });
+    item.addEventListener("dragover", (event) => {
+      const draggedId = event.dataTransfer?.getData("text/plain") || draggedTelegramKeywordRuleId;
+      if (!draggedId || draggedId === rule.id) return;
+      event.preventDefault();
+      const before = event.clientY < item.getBoundingClientRect().top + item.offsetHeight / 2;
+      item.classList.toggle("is-drop-before", before);
+      item.classList.toggle("is-drop-after", !before);
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    });
+    item.addEventListener("dragleave", () => {
+      item.classList.remove("is-drop-before", "is-drop-after");
+    });
+    item.addEventListener("drop", (event) => {
+      const draggedId = event.dataTransfer?.getData("text/plain") || draggedTelegramKeywordRuleId;
+      if (!draggedId || draggedId === rule.id) return;
+      event.preventDefault();
+      const sourceIndex = telegramKeywordRules.findIndex((entry) => entry.id === draggedId);
+      const targetIndex = telegramKeywordRules.findIndex((entry) => entry.id === rule.id);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const before = event.clientY < item.getBoundingClientRect().top + item.offsetHeight / 2;
+      let insertIndex = targetIndex + (before ? 0 : 1);
+      if (sourceIndex < insertIndex) insertIndex -= 1;
+      if (sourceIndex === insertIndex) return;
+      const [movedRule] = telegramKeywordRules.splice(sourceIndex, 1);
+      telegramKeywordRules.splice(insertIndex, 0, movedRule);
+      renderTelegramKeywordRules();
+      persistTelegramKeywordRules();
+    });
     const enabledLabel = document.createElement("label");
     enabledLabel.className = "telegram-keyword-toggle";
     const enabled = document.createElement("input");
@@ -1004,17 +1125,27 @@ function renderTelegramKeywordRules() {
     enabledLabel.append(enabled, document.createTextNode(rule.enabled ? "监控中" : "已暂停"));
     const tags = document.createElement("div");
     tags.className = "telegram-keyword-tags";
-    rule.terms.forEach((term, index) => {
-      if (index > 0) {
+    getTelegramKeywordRuleTermGroups(rule).forEach((group, groupIndex) => {
+      if (groupIndex > 0) {
         const joiner = document.createElement("span");
         joiner.className = "telegram-keyword-joiner";
-        joiner.textContent = rule.mode === "all" ? "且" : "或";
+        joiner.textContent = "且";
         tags.appendChild(joiner);
       }
-      const tag = document.createElement("span");
-      tag.className = "telegram-keyword-tag";
-      tag.textContent = term;
-      tags.appendChild(tag);
+      if (group.length > 1) tags.appendChild(document.createTextNode("("));
+      group.forEach((term, termIndex) => {
+        if (termIndex > 0) {
+          const joiner = document.createElement("span");
+          joiner.className = "telegram-keyword-joiner";
+          joiner.textContent = "或";
+          tags.appendChild(joiner);
+        }
+        const tag = document.createElement("span");
+        tag.className = "telegram-keyword-tag";
+        tag.textContent = term;
+        tags.appendChild(tag);
+      });
+      if (group.length > 1) tags.appendChild(document.createTextNode(")"));
     });
     if (rule.excludeTerms.length > 0) {
       const excludes = document.createElement("div");
@@ -1022,7 +1153,13 @@ function renderTelegramKeywordRules() {
       const label = document.createElement("span");
       label.textContent = "排除：";
       excludes.appendChild(label);
-      rule.excludeTerms.forEach((term) => {
+      rule.excludeTerms.forEach((term, index) => {
+        if (index > 0) {
+          const joiner = document.createElement("span");
+          joiner.className = "telegram-keyword-joiner";
+          joiner.textContent = "或";
+          excludes.appendChild(joiner);
+        }
         const tag = document.createElement("span");
         tag.className = "telegram-keyword-exclude-tag";
         tag.textContent = term;
@@ -1034,7 +1171,9 @@ function renderTelegramKeywordRules() {
     remove.type = "button";
     remove.className = "telegram-keyword-remove";
     remove.dataset.removeTelegramRule = rule.id;
-    remove.textContent = "删除";
+    remove.textContent = "×";
+    remove.title = `删除规则 ${rule.terms.join("、")}`;
+    remove.setAttribute("aria-label", remove.title);
     item.append(enabledLabel, tags, remove);
     list.appendChild(item);
   });
@@ -1070,6 +1209,11 @@ function handleTelegramKeywordRuleClick(event) {
   const item = event.target.closest("[data-telegram-rule-id]");
   const rule = telegramKeywordRules.find((entry) => entry.id === item?.dataset.telegramRuleId);
   if (!rule) return;
+  if (telegramKeywordEditingRuleId === rule.id) {
+    setTelegramKeywordEditingRule(null);
+    renderTelegramKeywordRules();
+    return;
+  }
   setTelegramKeywordEditingRule(rule);
   renderTelegramKeywordRules();
   document.querySelector("#telegramKeywordInput").focus();

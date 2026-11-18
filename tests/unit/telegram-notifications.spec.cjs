@@ -283,6 +283,25 @@ test("RSS keyword rules support any/all matches and rule-specific excluded terms
     .toEqual(["v.ps", "gen2"]);
 });
 
+test("RSS alias groups are all required and exclusion terms keep substring matching", () => {
+  const sandbox = createSandbox();
+  const post = { title: "Hytron 一折", categories: [] };
+  const baseRule = {
+    terms: ["海创", "Hytron", "一折", "1折"],
+    termGroups: [["海创", "Hytron"], ["一折", "1折"]],
+    mode: "all",
+    excludeTerms: []
+  };
+  const config = { telegramKeywordRules: [baseRule], telegramBlockedKeywords: [], telegramBoardSlugs: [] };
+  expect(vm.runInContext(`matchTelegramRssPost(${JSON.stringify(post)}, ${JSON.stringify(config)})`, sandbox))
+    .toEqual(["Hytron", "一折"]);
+
+  const excluded = { ...config, telegramKeywordRules: [{ ...baseRule, excludeTerms: ["yt"] }] };
+  expect(vm.runInContext(`matchTelegramRssPost(${JSON.stringify(post)}, ${JSON.stringify(excluded)})`, sandbox)).toEqual([]);
+  expect(vm.runInContext(`matchTelegramRssPost(${JSON.stringify({ ...post, title: "Hytron" })}, ${JSON.stringify(config)})`, sandbox))
+    .toEqual([]);
+});
+
 test("RSS does not send new posts when no keyword rule matches", async () => {
   const sentMessages = [];
   const stored = [];

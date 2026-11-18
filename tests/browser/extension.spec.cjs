@@ -79,39 +79,58 @@ test("extension loads, saves settings, and communicates with its background", as
     expect(response.ok).toBe(true);
     await page.locator('[data-panel-target="block-filter-panel"]').click();
     await page.locator("#addFollowKeywordGroup").click();
-    await page.locator(".follow-rule-name-input").fill("浏览器测试匹配组");
-    await page.locator(".follow-rule-match-mode-select").selectOption("all");
-    await page.locator("#confirmFollowRuleDialog").click();
-    const keywordGroup = page.locator("#followKeywordGroups .follow-rule-row").filter({ hasText: "浏览器测试匹配组" });
-    await keywordGroup.getByRole("button", { name: "编辑" }).click();
-    const matchedTerms = page.locator('[data-follow-rule-item-list="items"]');
-    await matchedTerms.fill("台湾, 家宽");
-    await page.locator('[data-follow-rule-item-list="excludeItems"]').fill("收, 出");
-    await page.locator("#followRuleDialogBody .follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule")).toHaveCount(1);
-    await matchedTerms.fill("TW, 家宽");
-    await page.locator('[data-follow-rule-item-list="excludeItems"]').fill("收, 出");
-    await page.locator("#followRuleDialogBody .follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule")).toHaveCount(2);
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(0)).toContainText("台湾");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(0)).toContainText("家宽");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(0)).toContainText("收");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(0)).not.toContainText("TW");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(1)).toContainText("TW");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(1)).not.toContainText("台湾");
+    const keywordGroup = page.locator("#followKeywordGroups .follow-rule-row").last();
+    await expect(page.locator("#followKeywordGroups")).toHaveClass(/follow-rule-card-grid/);
+    await expect(keywordGroup.locator(".follow-rule-row-count")).toHaveText("0 条规则");
+    await expect(keywordGroup.getByRole("button", { name: "样式" })).toBeVisible();
+    await expect(keywordGroup.getByRole("button", { name: "删除" })).toBeVisible();
+    await expect(keywordGroup).toHaveCSS("border-top-color", "rgb(255, 255, 255)");
+    await expect(keywordGroup.locator(".follow-rule-inline-editor")).toBeVisible();
+    await expect(keywordGroup).toHaveCSS("grid-column-end", "-1");
+    await keywordGroup.locator(".follow-rule-card-title").click();
+    await expect(keywordGroup.locator(".follow-rule-inline-editor")).toBeHidden();
+    await keywordGroup.locator(".follow-rule-card-title").click();
+    await expect(keywordGroup.locator(".follow-rule-inline-editor")).toBeVisible();
+    await keywordGroup.locator(".follow-rule-name-input").fill("浏览器测试匹配组");
+    await expect(keywordGroup.getByRole("button", { name: "编辑" })).toHaveCount(0);
+
+    const editor = keywordGroup.locator(".follow-rule-inline-editor");
+    const matchedTerms = editor.locator('[data-follow-rule-item-list="items"]');
+    const excludedTerms = editor.locator('[data-follow-rule-item-list="excludeItems"]');
+    const groupSwitch = keywordGroup.locator(".follow-rule-card-switch");
+    await expect(groupSwitch.locator("input")).toBeChecked();
+    await matchedTerms.fill("(台湾/TW), 家宽");
+    await excludedTerms.fill("收, 出");
+    await groupSwitch.click();
+    await expect(groupSwitch.locator("input")).not.toBeChecked();
+    await groupSwitch.click();
+    await expect(groupSwitch.locator("input")).toBeChecked();
+    await expect(matchedTerms).toHaveValue("(台湾/TW), 家宽");
+    await editor.locator(".follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
+    await expect(editor.locator(".telegram-keyword-rule")).toHaveCount(1);
+    await expect(editor.locator(".telegram-keyword-required-label")).toHaveCount(0);
+    await expect(editor.locator(".telegram-keyword-rule").first()).toContainText("台湾");
+    await expect(editor.locator(".telegram-keyword-rule").first()).toContainText("或");
+    await expect(editor.locator(".telegram-keyword-rule").first()).toContainText("且");
+    await expect(editor.locator(".telegram-keyword-rule").first()).toContainText("收或出");
+    await expect.poll(() => editor.locator(".telegram-keyword-rule-list").evaluate((node) => getComputedStyle(node).overflowY))
+      .toBe("visible");
+
+    await matchedTerms.fill("NoBrand, 无限");
+    await excludedTerms.fill("");
+    await editor.locator(".follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
+    await expect(editor.locator(".telegram-keyword-rule")).toHaveCount(2);
     await matchedTerms.fill("临时");
-    await page.locator("#followRuleDialogBody .follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
+    await editor.locator(".follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
     await page.getByRole("button", { name: "删除规则 临时" }).click();
-    await expect(page.locator("#confirmDialog")).toBeHidden();
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule")).toHaveCount(2);
-    await page.locator("#confirmFollowRuleDialog").click();
+    await expect(editor.locator(".telegram-keyword-rule")).toHaveCount(2);
     await expect.poll(() => worker.evaluate(async () => {
       const state = await chrome.storage.local.get("followRules");
       const group = state.followRules?.keywordGroups?.find((entry) => entry.name === "浏览器测试匹配组");
-      return group?.rules.map((rule) => [rule.mode, rule.terms, rule.excludeTerms]);
+      return group?.rules.map((rule) => [rule.mode, rule.termGroups, rule.excludeTerms]);
     })).toEqual([
-      ["all", ["台湾", "家宽"], ["收", "出"]],
-      ["all", ["TW", "家宽"], ["收", "出"]]
+      ["all", [["台湾", "TW"], ["家宽"]], ["收", "出"]],
+      ["all", [["NoBrand"], ["无限"]], []]
     ]);
     await page.locator('[data-panel-target="telegram-panel"]').click();
     await expect(page.locator("#addTelegramKeyword")).toHaveText("添加");
@@ -181,19 +200,38 @@ test("extension loads, saves settings, and communicates with its background", as
     })).toBe(3);
     await expect.poll(() => page.locator("#telegramBoardSlugs").evaluate((node) => {
       return getComputedStyle(node).gridTemplateColumns.split(" ").length;
-    })).toBe(5);
+    })).toBe(7);
+    await expect.poll(() => page.locator("#telegramBoardSlugs").evaluate((node) => {
+      const rows = new Map();
+      for (const label of node.querySelectorAll("label")) {
+        const top = Math.round(label.getBoundingClientRect().top);
+        rows.set(top, (rows.get(top) || 0) + 1);
+      }
+      return [...rows.values()];
+    })).toEqual([7, 6]);
     const boardCheckboxWidth = await page.locator("[data-telegram-board]").first().evaluate((node) => {
       return node.getBoundingClientRect().width;
     });
     expect(boardCheckboxWidth).toBeLessThan(24);
     await page.locator("#telegramKeywordInput").fill("v.ps, gen2\n家人");
-    await page.locator("#telegramKeywordMode").selectOption("all");
     await page.locator("#telegramKeywordExcludeInput").fill("已出, 求购");
     await page.locator("#addTelegramKeyword").click();
+    await expect(page.locator("#telegramKeywordRuleList .telegram-keyword-required-label")).toHaveCount(0);
     await page.locator("[data-telegram-board]").evaluateAll((inputs) => {
       inputs.forEach((input) => { input.checked = false; });
     });
-    await page.locator('[data-telegram-board][value="daily"]').check();
+    await page.locator('#telegramBoardSlugs label:has(input[value="daily"])').click();
+    const boardStyles = await page.evaluate(() => {
+      const selected = document.querySelector('[data-telegram-board][value="daily"]').closest("label");
+      const unselected = document.querySelector('[data-telegram-board][value="tech"]').closest("label");
+      return {
+        selectedBorder: getComputedStyle(selected).borderColor,
+        unselectedBorder: getComputedStyle(unselected).borderColor,
+        checkboxOpacity: getComputedStyle(selected.querySelector("input")).opacity
+      };
+    });
+    expect(boardStyles.selectedBorder).not.toBe(boardStyles.unselectedBorder);
+    expect(boardStyles.checkboxOpacity).toBe("0");
     await expect.poll(() => worker.evaluate(async () => {
       const state = await chrome.storage.local.get(["telegramTargets", "telegramBotToken", "telegramKeywordRules", "telegramBoardSlugs"]);
       return [state.telegramTargets?.map((target) => [target.type, target.name]), state.telegramBotToken,
@@ -206,13 +244,38 @@ test("extension loads, saves settings, and communicates with its background", as
     await page.locator('[data-panel-target="block-filter-panel"]').click();
     const restoredKeywordGroup = page.locator("#followKeywordGroups .follow-rule-row").filter({ hasText: "浏览器测试匹配组" });
     await expect(restoredKeywordGroup).toContainText("2 条规则");
-    await restoredKeywordGroup.getByRole("button", { name: "编辑" }).click();
-    await expect(page.locator(".follow-rule-match-mode-select")).toHaveValue("all");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule")).toHaveCount(2);
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(0)).toContainText("台湾");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(0)).not.toContainText("TW");
-    await expect(page.locator("#followRuleDialogBody .telegram-keyword-rule").nth(1)).toContainText("TW");
-    await page.locator("#cancelFollowRuleDialog").click();
+    await restoredKeywordGroup.locator(".follow-rule-row-expand").click();
+    await expect(restoredKeywordGroup.locator(".follow-rule-inline-editor .telegram-keyword-rule")).toHaveCount(2);
+    await expect(restoredKeywordGroup.locator(".follow-rule-inline-editor .telegram-keyword-rule").first()).toContainText("台湾");
+    await expect(restoredKeywordGroup.locator(".follow-rule-inline-editor .telegram-keyword-rule").first()).toContainText("TW");
+    const restoredRule = restoredKeywordGroup.locator(".follow-rule-inline-editor .telegram-keyword-rule").first();
+    const ruleGeometry = await restoredRule.evaluate((card) => {
+      const toggle = card.querySelector(".telegram-keyword-toggle").getBoundingClientRect();
+      const remove = card.querySelector(".telegram-keyword-remove").getBoundingClientRect();
+      const bounds = card.getBoundingClientRect();
+      return {
+        toggleWidth: toggle.width,
+        cardWidth: bounds.width,
+        blankClickX: toggle.right + 4 - bounds.left,
+        blankClickY: toggle.top + toggle.height / 2 - bounds.top,
+        hasBlankSpace: toggle.right + 8 < remove.left
+      };
+    });
+    expect(ruleGeometry.toggleWidth).toBeLessThan(ruleGeometry.cardWidth - 40);
+    expect(ruleGeometry.hasBlankSpace).toBe(true);
+    await restoredRule.click({ position: { x: ruleGeometry.blankClickX, y: ruleGeometry.blankClickY } });
+    await expect(restoredRule).toHaveClass(/is-editing/);
+    await restoredRule.locator(".telegram-keyword-tags").click();
+    await expect(restoredRule).not.toHaveClass(/is-editing/);
+    await expect(restoredKeywordGroup.locator('.follow-rule-inline-editor [data-follow-rule-item-list="items"]')).toHaveValue("");
+    const nextRule = restoredKeywordGroup.locator(".follow-rule-inline-editor .telegram-keyword-rule").nth(1);
+    await nextRule.dragTo(restoredRule, { targetPosition: { x: 40, y: 2 } });
+    await expect(restoredKeywordGroup.locator(".follow-rule-inline-editor .telegram-keyword-rule").first()).toContainText("NoBrand");
+    await expect.poll(() => worker.evaluate(async () => {
+      const state = await chrome.storage.local.get("followRules");
+      const group = state.followRules?.keywordGroups?.find((entry) => entry.name === "浏览器测试匹配组");
+      return group?.rules.map((rule) => rule.termGroups);
+    })).toEqual([[ ["NoBrand"], ["无限"] ], [ ["台湾", "TW"], ["家宽"] ]]);
     await page.locator('[data-panel-target="telegram-panel"]').click();
     await expect(page.locator("#telegramTargetList")).toContainText("test personal");
     await expect(page.locator("#telegramKeywordRuleList")).toContainText("已出");
@@ -233,13 +296,30 @@ test("extension loads, saves settings, and communicates with its background", as
       const state = await chrome.storage.local.get("telegramTargets");
       return state.telegramTargets?.[0]?.enabled;
     })).toBe(true);
+    await page.locator("#telegramKeywordInput").fill("NoBrand, 无限");
+    await page.locator("#telegramKeywordExcludeInput").fill("");
+    await page.locator("#addTelegramKeyword").click();
+    const telegramRules = page.locator("#telegramKeywordRuleList .telegram-keyword-rule");
+    await expect(telegramRules).toHaveCount(2);
+    const firstTelegramRule = telegramRules.first();
+    await firstTelegramRule.locator(".telegram-keyword-tags").click();
+    await expect(firstTelegramRule).toHaveClass(/is-editing/);
+    await firstTelegramRule.locator(".telegram-keyword-tags").click();
+    await expect(firstTelegramRule).not.toHaveClass(/is-editing/);
+    await expect(page.locator("#telegramKeywordInput")).toHaveValue("");
+    await telegramRules.nth(1).dragTo(firstTelegramRule, { targetPosition: { x: 40, y: 2 } });
+    await expect(telegramRules.first().locator(".telegram-keyword-tags")).toContainText("NoBrand");
+    await expect.poll(() => worker.evaluate(async () => {
+      const state = await chrome.storage.local.get("telegramKeywordRules");
+      return state.telegramKeywordRules?.map((rule) => rule.termGroups);
+    })).toEqual([[ ["NoBrand"], ["无限"] ], [["v.ps"], ["gen2"], ["家人"]]]);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect.poll(() => page.locator("#telegramKeywordRuleList").evaluate((node) => {
       return getComputedStyle(node).gridTemplateColumns.split(" ").length;
     })).toBe(1);
     await expect.poll(() => page.locator("#telegramBoardSlugs").evaluate((node) => {
       return getComputedStyle(node).gridTemplateColumns.split(" ").length;
-    })).toBe(2);
+    })).toBe(3);
     expect(errors).toEqual([]);
   } finally {
     if (context) await context.close();

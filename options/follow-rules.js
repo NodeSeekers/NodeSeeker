@@ -63,8 +63,10 @@ let followRulesDraft = {
 };
 let pendingFollowRuleEditor = null;
 let pendingFollowRuleStyleEditor = null;
+let expandedFollowRuleGroupId = "";
+let draggedFollowRuleKeywordId = "";
 
-addFollowKeywordGroupButton.addEventListener("click", () => openFollowRuleEditor("keyword"));
+addFollowKeywordGroupButton.addEventListener("click", createAndExpandFollowKeywordGroup);
 addFollowUserGroupButton.addEventListener("click", () => openFollowRuleEditor("user"));
 cancelFollowRuleDialogButton.addEventListener("click", closeFollowRuleDialog);
 confirmFollowRuleDialogButton.addEventListener("click", confirmFollowRuleDialog);
@@ -140,17 +142,29 @@ function normalizeFollowRuleKeywordRules(group, groupId, usedIds) {
       : []);
 
   return savedRules.filter(isFollowRuleObject).map((rule, index) => {
-    const terms = normalizeFollowRuleItems(rule.terms);
+    const legacyTerms = normalizeFollowRuleItems(rule.terms);
+    const termGroups = normalizeFollowRuleTermGroups(rule.termGroups, legacyTerms, rule.mode);
+    const terms = normalizeFollowRuleItems(termGroups.flat());
     if (terms.length === 0) return null;
     const baseId = normalizeFollowRuleText(rule.id) || `${groupId}-rule-${index + 1}`;
     return {
       id: createUniqueFollowRuleId(baseId, usedIds),
       enabled: rule.enabled !== false,
-      mode: normalizeFollowRuleMatchMode(rule.mode, terms.length),
+      mode: "all",
       terms,
+      termGroups,
       excludeTerms: normalizeFollowRuleItems(rule.excludeTerms)
     };
   }).filter(Boolean);
+}
+
+function normalizeFollowRuleTermGroups(value, fallbackTerms = [], fallbackMode = "all") {
+  const savedGroups = Array.isArray(value)
+    ? value.map((group) => normalizeFollowRuleItems(group)).filter((group) => group.length > 0)
+    : [];
+  if (savedGroups.length > 0) return savedGroups;
+  const terms = normalizeFollowRuleItems(fallbackTerms);
+  return fallbackMode === "any" ? (terms.length > 0 ? [terms] : []) : terms.map((term) => [term]);
 }
 
 function normalizeFollowRuleMatchMode(value, itemCount = 0) {
@@ -275,7 +289,12 @@ function cloneFollowRuleGroup(type, group) {
     name: group.name,
     enabled: group.enabled !== false,
     ...(type === "keyword"
-      ? { rules: group.rules.map((rule) => ({ ...rule, terms: [...rule.terms], excludeTerms: [...rule.excludeTerms] })) }
+      ? { rules: group.rules.map((rule) => ({
+        ...rule,
+        terms: [...rule.terms],
+        termGroups: rule.termGroups.map((terms) => [...terms]),
+        excludeTerms: [...rule.excludeTerms]
+      })) }
       : { items: [...group.items] }),
     styles: normalizeFollowRuleStyles(group.styles, type)
   };
@@ -284,6 +303,7 @@ function cloneFollowRuleGroup(type, group) {
 function setFollowRulesEditorValue(value) {
   closeFollowRuleDialog();
   closeFollowRuleStyleDialog();
+  expandedFollowRuleGroupId = "";
   followRulesDraft = normalizeFollowRules(value);
   renderFollowRuleEditor();
 }
@@ -310,6 +330,7 @@ function renderFollowRuleGroups(type) {
   const config = FOLLOW_RULE_TYPE_CONFIG[type];
   const groups = followRulesDraft[config.collectionKey];
   const list = getFollowRuleListNode(type);
+  list.classList.toggle("follow-rule-card-grid", type === "keyword");
   list.replaceChildren();
 
   if (groups.length === 0) {
@@ -326,22 +347,38 @@ function renderFollowRuleGroups(type) {
 function createFollowRuleRow(type, group) {
   const config = FOLLOW_RULE_TYPE_CONFIG[type];
   const row = document.createElement("article");
-  row.className = "follow-rule-row";
+  row.className = `follow-rule-row${type === "keyword" ? " follow-rule-keyword-card" : ""}`;
+  row.classList.toggle("is-expanded", type === "keyword" && expandedFollowRuleGroupId === group.id);
   row.classList.toggle("is-disabled", group.enabled === false);
   row.dataset.followRuleGroupId = group.id;
+  if (type === "keyword") {
+    setFollowRuleCardBorderColor(row, group);
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("button, input, label, .follow-rule-inline-editor")) return;
+      toggleFollowKeywordGroupEditor(group.id);
+    });
+  }
 
-  const summary = document.createElement("div");
-  summary.className = "follow-rule-row-summary";
+  const summary = document.createElement(type === "keyword" ? "button" : "div");
+  summary.className = type === "keyword"
+    ? "follow-rule-row-summary follow-rule-row-expand follow-rule-card-title"
+    : "follow-rule-row-summary";
+  if (type === "keyword") {
+    summary.type = "button";
+    summary.setAttribute("aria-expanded", String(expandedFollowRuleGroupId === group.id));
+    summary.addEventListener("click", () => toggleFollowKeywordGroupEditor(group.id));
+  }
   const name = document.createElement("strong");
   name.className = "follow-rule-row-name";
   name.textContent = group.name;
+  summary.appendChild(name);
   const count = document.createElement("span");
   count.className = "follow-rule-row-count";
   count.textContent = type === "keyword"
     ? `${group.rules.length} 条规则`
     : `${group.items.length} 个${config.itemLabel}`;
-  summary.append(name, count);
-  if (group.enabled === false) {
+  if (type !== "keyword") summary.appendChild(count);
+  if (group.enabled === false && type !== "keyword") {
     const status = document.createElement("span");
     status.className = "follow-rule-row-status";
     status.textContent = "已禁用";
@@ -350,10 +387,36 @@ function createFollowRuleRow(type, group) {
 
   const actions = document.createElement("div");
   actions.className = "follow-rule-row-actions";
-  const editButton = document.createElement("button");
-  editButton.type = "button";
-  editButton.textContent = "编辑";
-  editButton.addEventListener("click", () => openFollowRuleEditor(type, group.id));
+  let cardMeta = null;
+  if (type === "keyword") {
+    const enabledLabel = document.createElement("label");
+    enabledLabel.className = "switch switch-small follow-rule-card-switch";
+    const enabledInput = document.createElement("input");
+    enabledInput.className = "switch-input";
+    enabledInput.type = "checkbox";
+    enabledInput.checked = group.enabled !== false;
+    enabledInput.setAttribute("aria-label", `${enabledInput.checked ? "停用" : "启用"}关键词组 ${group.name}`);
+    enabledInput.addEventListener("change", () => {
+      group.enabled = enabledInput.checked;
+      row.classList.toggle("is-disabled", group.enabled === false);
+      enabledInput.setAttribute("aria-label", `${enabledInput.checked ? "停用" : "启用"}关键词组 ${group.name}`);
+      showPendingSaveToast();
+    });
+    const enabledTrack = document.createElement("span");
+    enabledTrack.className = "switch-track";
+    enabledTrack.setAttribute("aria-hidden", "true");
+    enabledLabel.append(enabledInput, enabledTrack);
+    actions.appendChild(enabledLabel);
+    cardMeta = document.createElement("div");
+    cardMeta.className = "follow-rule-card-meta";
+    cardMeta.append(count, actions);
+  } else {
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.textContent = "编辑";
+    editButton.addEventListener("click", () => openFollowRuleEditor(type, group.id));
+    actions.appendChild(editButton);
+  }
   const styleButton = document.createElement("button");
   styleButton.type = "button";
   styleButton.textContent = "样式";
@@ -363,10 +426,64 @@ function createFollowRuleRow(type, group) {
   deleteButton.className = "follow-rule-delete-group";
   deleteButton.textContent = "删除";
   deleteButton.addEventListener("click", () => confirmFollowRuleGroupRemoval(type, group.id));
-  actions.append(editButton, styleButton, deleteButton);
+  actions.append(styleButton, deleteButton);
 
-  row.append(summary, actions);
+  if (type === "keyword") {
+    row.append(summary, cardMeta);
+  } else {
+    row.append(summary, actions);
+  }
+  if (type === "keyword" && expandedFollowRuleGroupId === group.id) {
+    const editor = document.createElement("div");
+    editor.className = "follow-rule-inline-editor";
+    editor.dataset.followRuleInlineEditor = group.id;
+    row.appendChild(editor);
+    if (!pendingFollowRuleEditor?.inline || pendingFollowRuleEditor.groupId !== group.id) {
+      pendingFollowRuleEditor = {
+        type: "keyword",
+        groupId: group.id,
+        ruleMode: "all",
+        editingRuleId: "",
+        inline: true,
+        group
+      };
+    }
+    renderFollowRuleEditorBody(editor);
+  }
   return row;
+}
+
+function setFollowRuleCardBorderColor(row, group) {
+  const borderStyle = normalizeFollowRuleStyles(group.styles, "keyword").borderColor;
+  row.style.setProperty("--follow-rule-card-border-color", borderStyle.enabled ? borderStyle.color : "#ffffff");
+}
+
+function createAndExpandFollowKeywordGroup() {
+  const group = createFollowRuleGroup("keyword");
+  followRulesDraft.keywordGroups.push(group);
+  expandedFollowRuleGroupId = group.id;
+  pendingFollowRuleEditor = {
+    type: "keyword",
+    groupId: group.id,
+    ruleMode: "all",
+    editingRuleId: "",
+    inline: true,
+    group
+  };
+  renderFollowRuleGroups("keyword");
+  showPendingSaveToast();
+  followKeywordGroupsNode.querySelector(`[data-follow-rule-inline-editor="${group.id}"] .follow-rule-name-input`)?.focus();
+}
+
+function toggleFollowKeywordGroupEditor(groupId) {
+  if (expandedFollowRuleGroupId === groupId) {
+    expandedFollowRuleGroupId = "";
+    if (pendingFollowRuleEditor?.inline) pendingFollowRuleEditor = null;
+  } else {
+    expandedFollowRuleGroupId = groupId;
+    pendingFollowRuleEditor = null;
+  }
+  renderFollowRuleGroups("keyword");
 }
 
 function getFollowRuleListNode(type) {
@@ -382,6 +499,10 @@ function removeFollowRuleGroup(type, groupId) {
   const config = FOLLOW_RULE_TYPE_CONFIG[type];
   followRulesDraft[config.collectionKey] = followRulesDraft[config.collectionKey]
     .filter((group) => group.id !== groupId);
+  if (expandedFollowRuleGroupId === groupId) {
+    expandedFollowRuleGroupId = "";
+    if (pendingFollowRuleEditor?.inline) pendingFollowRuleEditor = null;
+  }
   renderFollowRuleGroups(type);
   showPendingSaveToast();
 }
@@ -402,6 +523,11 @@ function confirmFollowRuleGroupRemoval(type, groupId) {
 }
 
 function openFollowRuleEditor(type, groupId = "") {
+  if (expandedFollowRuleGroupId) {
+    expandedFollowRuleGroupId = "";
+    pendingFollowRuleEditor = null;
+    renderFollowRuleGroups("keyword");
+  }
   const source = groupId ? getFollowRuleGroup(type, groupId) : createFollowRuleGroup(type);
   if (!source) {
     return;
@@ -496,6 +622,11 @@ function confirmFollowRuleStyleDialog() {
     const normalizedStyles = normalizeFollowRuleStyles(styles, type);
     const changed = JSON.stringify(group.styles) !== JSON.stringify(normalizedStyles);
     group.styles = normalizedStyles;
+    if (type === "keyword") {
+      const row = [...followKeywordGroupsNode.querySelectorAll("[data-follow-rule-group-id]")]
+        .find((node) => node.dataset.followRuleGroupId === groupId);
+      if (row) setFollowRuleCardBorderColor(row, group);
+    }
     if (changed) {
       showPendingSaveToast();
     }
@@ -504,13 +635,17 @@ function confirmFollowRuleStyleDialog() {
 }
 
 function renderFollowRuleDialogBody() {
+  renderFollowRuleEditorBody(followRuleDialogBody);
+}
+
+function renderFollowRuleEditorBody(container) {
   if (!pendingFollowRuleEditor) {
     return;
   }
 
   const { type, group } = pendingFollowRuleEditor;
   const config = FOLLOW_RULE_TYPE_CONFIG[type];
-  followRuleDialogBody.replaceChildren();
+  container.replaceChildren();
 
   const nameLabel = document.createElement("label");
   const nameText = document.createElement("span");
@@ -521,7 +656,17 @@ function renderFollowRuleDialogBody() {
   nameInput.value = group.name;
   nameInput.maxLength = 40;
   nameInput.addEventListener("input", () => {
-    group.name = nameInput.value;
+    const value = normalizeFollowRuleText(nameInput.value);
+    if (!pendingFollowRuleEditor?.inline) {
+      group.name = nameInput.value;
+      return;
+    }
+    if (!value) return;
+    group.name = value;
+    const row = nameInput.closest("[data-follow-rule-group-id]");
+    const summaryName = row?.querySelector(".follow-rule-row-name");
+    if (summaryName) summaryName.textContent = value;
+    showPendingSaveToast();
   });
   nameLabel.append(nameText, nameInput);
 
@@ -529,7 +674,7 @@ function renderFollowRuleDialogBody() {
   mainFields.className = `follow-rule-main-fields${pendingFollowRuleEditor.groupId ? "" : " is-new"}`;
   mainFields.appendChild(nameLabel);
 
-  if (pendingFollowRuleEditor.groupId) {
+  if (type !== "keyword" && pendingFollowRuleEditor.groupId) {
     const statusLabel = document.createElement("label");
     const statusText = document.createElement("span");
     statusText.textContent = "状态";
@@ -552,11 +697,25 @@ function renderFollowRuleDialogBody() {
     mainFields.appendChild(statusLabel);
   }
 
-  followRuleDialogBody.appendChild(mainFields);
+  container.appendChild(mainFields);
   if (type === "keyword") {
-    followRuleDialogBody.appendChild(createFollowRuleKeywordEditor(group));
+    container.appendChild(createFollowRuleKeywordEditor(group));
   } else if (pendingFollowRuleEditor.groupId) {
-    followRuleDialogBody.appendChild(createFollowRuleItemEditor(group, config));
+    container.appendChild(createFollowRuleItemEditor(group, config));
+  }
+}
+
+function getCurrentFollowRuleEditorRoot() {
+  if (!pendingFollowRuleEditor?.inline) return followRuleDialogBody;
+  return [...followKeywordGroupsNode.querySelectorAll("[data-follow-rule-inline-editor]")]
+    .find((node) => node.dataset.followRuleInlineEditor === pendingFollowRuleEditor.groupId) || null;
+}
+
+function renderPendingFollowRuleEditor() {
+  if (pendingFollowRuleEditor?.inline) {
+    renderFollowRuleGroups("keyword");
+  } else {
+    renderFollowRuleDialogBody();
   }
 }
 
@@ -581,34 +740,23 @@ function createFollowRuleMatchModeSelect(value, onChange) {
 function createFollowRuleKeywordEditor(group) {
   const section = document.createElement("div");
   section.className = "follow-rule-keyword-editor";
-  const heading = document.createElement("div");
-  heading.className = "follow-rule-keyword-heading";
-  const title = document.createElement("span");
-  title.className = "follow-rule-field-label";
-  title.textContent = "关键词";
-  const hint = document.createElement("small");
-  hint.id = "followKeywordRuleHint";
-  hint.textContent = "每次添加生成一条独立规则；排除词按“或”匹配，任一命中则此规则不触发。";
-  heading.append(title, hint);
-
   const entry = document.createElement("div");
-  entry.className = "follow-rule-keyword-entry";
-  const keywordInput = createFollowRuleKeywordInput("items", "命中词，例如：台湾, 家宽");
-  const excludeInput = createFollowRuleKeywordInput("excludeItems", "排除词，例如：已出, 求购");
-  excludeInput.setAttribute("aria-describedby", hint.id);
+  entry.className = "telegram-keyword-form follow-rule-keyword-entry";
+  const keywordInput = createFollowRuleKeywordInput("items", "(台湾/TW),家宽");
+  const separator = document.createElement("span");
+  separator.className = "keyword-exclusion-separator";
+  separator.textContent = "排除";
+  const excludeInput = createFollowRuleKeywordInput("excludeItems", "已出, yt");
   const editingRule = group.rules.find((rule) => rule.id === pendingFollowRuleEditor.editingRuleId);
   if (editingRule) {
-    keywordInput.value = editingRule.terms.join(", ");
+    keywordInput.value = formatFollowRuleKeywordExpression(editingRule);
     excludeInput.value = editingRule.excludeTerms.join(", ");
     pendingFollowRuleEditor.ruleMode = editingRule.mode;
   }
-  const matchMode = createFollowRuleMatchModeSelect(editingRule?.mode || pendingFollowRuleEditor.ruleMode, (value) => {
-    pendingFollowRuleEditor.ruleMode = value;
-  });
   const addButton = document.createElement("button");
   addButton.type = "button";
   addButton.textContent = editingRule ? "修改" : "添加";
-  addButton.title = editingRule ? "保存对这条规则的修改" : "将命中词和排除词作为一条独立规则添加";
+  addButton.title = editingRule ? "保存修改" : "添加规则";
   addButton.addEventListener("click", addPendingFollowRuleItems);
   [keywordInput, excludeInput].forEach((input) => input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -616,9 +764,9 @@ function createFollowRuleKeywordEditor(group) {
       addPendingFollowRuleItems();
     }
   }));
-  entry.append(keywordInput, excludeInput, matchMode, addButton);
+  entry.append(keywordInput, separator, excludeInput, addButton);
 
-  section.append(heading, entry, createFollowRuleKeywordRuleList(group));
+  section.append(entry, createFollowRuleKeywordRuleList(group));
   return section;
 }
 
@@ -639,15 +787,68 @@ function createFollowRuleKeywordRuleCard(rule) {
   const item = document.createElement("li");
   item.className = `telegram-keyword-rule is-editable${rule.enabled ? " is-enabled" : " is-disabled"}${rule.excludeTerms.length ? " has-exclusions" : ""}${rule.id === pendingFollowRuleEditor.editingRuleId ? " is-editing" : ""}`;
   item.dataset.followRuleKeywordRuleId = rule.id;
-  item.title = "点击卡片编辑规则";
+  item.draggable = true;
+  item.title = "点击卡片编辑规则；拖动卡片调整顺序";
   item.addEventListener("click", (event) => {
     if (event.target.closest("button, input, label")) return;
     const current = pendingFollowRuleEditor?.group.rules.find((entry) => entry.id === rule.id);
     if (!current) return;
+    if (pendingFollowRuleEditor.editingRuleId === current.id) {
+      pendingFollowRuleEditor.editingRuleId = "";
+      pendingFollowRuleEditor.ruleMode = "all";
+      renderPendingFollowRuleEditor();
+      return;
+    }
     pendingFollowRuleEditor.editingRuleId = current.id;
     pendingFollowRuleEditor.ruleMode = current.mode;
-    renderFollowRuleDialogBody();
-    followRuleDialogBody.querySelector('[data-follow-rule-item-list="items"]')?.focus();
+    renderPendingFollowRuleEditor();
+    getCurrentFollowRuleEditorRoot()?.querySelector('[data-follow-rule-item-list="items"]')?.focus();
+  });
+  item.addEventListener("dragstart", (event) => {
+    if (event.target.closest("button, input, label")) {
+      event.preventDefault();
+      return;
+    }
+    draggedFollowRuleKeywordId = rule.id;
+    item.classList.add("is-dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", rule.id);
+    }
+  });
+  item.addEventListener("dragend", () => {
+    draggedFollowRuleKeywordId = "";
+    item.classList.remove("is-dragging", "is-drop-before", "is-drop-after");
+  });
+  item.addEventListener("dragover", (event) => {
+    const draggedId = event.dataTransfer?.getData("text/plain") || draggedFollowRuleKeywordId;
+    if (!draggedId || draggedId === rule.id) return;
+    event.preventDefault();
+    const before = event.clientY < item.getBoundingClientRect().top + item.offsetHeight / 2;
+    item.classList.toggle("is-drop-before", before);
+    item.classList.toggle("is-drop-after", !before);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  });
+  item.addEventListener("dragleave", () => {
+    item.classList.remove("is-drop-before", "is-drop-after");
+  });
+  item.addEventListener("drop", (event) => {
+    const draggedId = event.dataTransfer?.getData("text/plain") || draggedFollowRuleKeywordId;
+    if (!draggedId || draggedId === rule.id) return;
+    event.preventDefault();
+    const rules = pendingFollowRuleEditor?.group.rules;
+    if (!rules) return;
+    const sourceIndex = rules.findIndex((entry) => entry.id === draggedId);
+    const targetIndex = rules.findIndex((entry) => entry.id === rule.id);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const before = event.clientY < item.getBoundingClientRect().top + item.offsetHeight / 2;
+    let insertIndex = targetIndex + (before ? 0 : 1);
+    if (sourceIndex < insertIndex) insertIndex -= 1;
+    if (sourceIndex === insertIndex) return;
+    const [movedRule] = rules.splice(sourceIndex, 1);
+    rules.splice(insertIndex, 0, movedRule);
+    renderPendingFollowRuleEditor();
+    if (pendingFollowRuleEditor?.inline) showPendingSaveToast();
   });
 
   const enabledLabel = document.createElement("label");
@@ -660,30 +861,23 @@ function createFollowRuleKeywordRuleCard(rule) {
     const current = pendingFollowRuleEditor?.group.rules.find((entry) => entry.id === rule.id);
     if (!current) return;
     current.enabled = enabled.checked;
-    renderFollowRuleDialogBody();
+    item.classList.toggle("is-disabled", !current.enabled);
+    item.classList.toggle("is-enabled", current.enabled);
+    enabledLabel.lastChild.textContent = current.enabled ? "监控中" : "已暂停";
+    if (pendingFollowRuleEditor?.inline) showPendingSaveToast();
   });
   enabledLabel.append(enabled, document.createTextNode(rule.enabled ? "监控中" : "已暂停"));
 
   const tags = document.createElement("div");
   tags.className = "telegram-keyword-tags";
-  rule.terms.forEach((term, index) => {
-    if (index > 0) {
-      const joiner = document.createElement("span");
-      joiner.className = "telegram-keyword-joiner";
-      joiner.textContent = rule.mode === "all" ? "且" : "或";
-      tags.appendChild(joiner);
-    }
-    const tag = document.createElement("span");
-    tag.className = "telegram-keyword-tag";
-    tag.textContent = term;
-    tags.appendChild(tag);
-  });
+  appendFollowRuleRequiredPreview(tags, rule);
 
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "telegram-keyword-remove";
-  remove.textContent = "删除";
-  remove.setAttribute("aria-label", `删除规则 ${rule.terms.join("、")}`);
+  remove.textContent = "×";
+  remove.title = `删除规则 ${rule.terms.join("、")}`;
+  remove.setAttribute("aria-label", remove.title);
   remove.addEventListener("click", () => removePendingFollowRuleKeywordRule(rule.id));
   item.append(enabledLabel, tags, remove);
 
@@ -693,7 +887,13 @@ function createFollowRuleKeywordRuleCard(rule) {
     const label = document.createElement("span");
     label.textContent = "排除：";
     excludes.appendChild(label);
-    rule.excludeTerms.forEach((term) => {
+    rule.excludeTerms.forEach((term, index) => {
+      if (index > 0) {
+        const joiner = document.createElement("span");
+        joiner.className = "telegram-keyword-joiner";
+        joiner.textContent = "或";
+        excludes.appendChild(joiner);
+      }
       const tag = document.createElement("span");
       tag.className = "telegram-keyword-exclude-tag";
       tag.textContent = term;
@@ -826,8 +1026,8 @@ function addPendingFollowRuleItem(input) {
   }
 
   group[listKey].push(value);
-  renderFollowRuleDialogBody();
-  followRuleDialogBody.querySelector(`[data-follow-rule-item-list="${listKey}"]`)?.focus();
+  renderPendingFollowRuleEditor();
+  getCurrentFollowRuleEditorRoot()?.querySelector(`[data-follow-rule-item-list="${listKey}"]`)?.focus();
 }
 
 function parseFollowRuleEditorItems(value) {
@@ -843,17 +1043,105 @@ function parseFollowRuleEditorItems(value) {
     });
 }
 
+function parseFollowRuleKeywordExpression(value) {
+  const text = String(value || "").replace(/\s*[\/／]\s*/g, "/").trim();
+  if (!text) return [];
+  const termGroups = [];
+  let current = "";
+  let inParentheses = false;
+  let invalid = false;
+  const addGroup = () => {
+    const expression = current.trim();
+    current = "";
+    if (!expression) return;
+    const terms = expression.split(/[\/／]/).map(normalizeFollowRuleText);
+    if (terms.some((term) => !term)) {
+      invalid = true;
+      return;
+    }
+    const seen = new Set();
+    const uniqueTerms = terms.filter((term) => {
+      const identity = getFollowRuleItemIdentity("keyword", term);
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+    if (uniqueTerms.length > 0) termGroups.push(uniqueTerms);
+  };
+
+  for (const char of text) {
+    if (char === "(") {
+      if (inParentheses || current.trim()) return [];
+      inParentheses = true;
+      continue;
+    }
+    if (char === ")") {
+      if (!inParentheses) return [];
+      inParentheses = false;
+      addGroup();
+      if (invalid) return [];
+      continue;
+    }
+    if (/[,，\s]/.test(char)) {
+      if (inParentheses) return [];
+      addGroup();
+      if (invalid) return [];
+      continue;
+    }
+    current += char;
+  }
+  if (inParentheses) return [];
+  addGroup();
+  return invalid ? [] : termGroups;
+}
+
+function formatFollowRuleKeywordExpression(rule) {
+  return normalizeFollowRuleTermGroups(rule.termGroups, rule.terms, rule.mode)
+    .map((terms) => terms.length > 1 ? `(${terms.join("/")})` : terms[0])
+    .join(", ");
+}
+
+function appendFollowRuleRequiredPreview(container, rule) {
+  normalizeFollowRuleTermGroups(rule.termGroups, rule.terms, rule.mode).forEach((terms, groupIndex) => {
+    if (groupIndex > 0) {
+      const joiner = document.createElement("span");
+      joiner.className = "telegram-keyword-joiner";
+      joiner.textContent = "且";
+      container.appendChild(joiner);
+    }
+    if (terms.length > 1) container.appendChild(document.createTextNode("("));
+    terms.forEach((term, termIndex) => {
+      if (termIndex > 0) {
+        const joiner = document.createElement("span");
+        joiner.className = "telegram-keyword-joiner";
+        joiner.textContent = "或";
+        container.appendChild(joiner);
+      }
+      const tag = document.createElement("span");
+      tag.className = "telegram-keyword-tag";
+      tag.textContent = term;
+      container.appendChild(tag);
+    });
+    if (terms.length > 1) container.appendChild(document.createTextNode(")"));
+  });
+}
+
 function addPendingFollowRuleItems() {
   if (!pendingFollowRuleEditor || pendingFollowRuleEditor.type !== "keyword") return;
 
   const { group } = pendingFollowRuleEditor;
   const editingRule = group.rules.find((rule) => rule.id === pendingFollowRuleEditor.editingRuleId);
-  const keywordInput = followRuleDialogBody.querySelector('[data-follow-rule-item-list="items"]');
-  const excludeInput = followRuleDialogBody.querySelector('[data-follow-rule-item-list="excludeItems"]');
-  const newItems = parseFollowRuleEditorItems(keywordInput?.value);
+  const editorRoot = getCurrentFollowRuleEditorRoot();
+  const keywordInput = editorRoot?.querySelector('[data-follow-rule-item-list="items"]');
+  const excludeInput = editorRoot?.querySelector('[data-follow-rule-item-list="excludeItems"]');
+  const termGroups = parseFollowRuleKeywordExpression(keywordInput?.value);
+  const newItems = normalizeFollowRuleItems(termGroups.flat());
   const newExcludedItems = parseFollowRuleEditorItems(excludeInput?.value);
 
-  if (newItems.length === 0) {
+  if (termGroups.length === 0 || termGroups.some((terms) => terms.length === 0)) {
+    if (keywordInput?.value.trim()) {
+      showToast("关键词格式不正确：别名请用 / 分隔，括号内表示“或”，不同条件用逗号或空格分开。例如 (NoBrand/NB/NNB), 无限", "error");
+    }
     keywordInput?.focus();
     return;
   }
@@ -868,13 +1156,14 @@ function addPendingFollowRuleItems() {
   const newRule = {
     id: editingRule?.id || createFollowRuleId(),
     enabled: editingRule?.enabled ?? true,
-    mode: pendingFollowRuleEditor.ruleMode,
+    mode: "all",
     terms: newItems,
+    termGroups,
     excludeTerms: newExcludedItems
   };
   const ruleIdentity = (rule) => JSON.stringify({
-    terms: rule.terms.map((item) => getFollowRuleItemIdentity("keyword", item)),
-    mode: rule.mode,
+    termGroups: normalizeFollowRuleTermGroups(rule.termGroups, rule.terms, rule.mode)
+      .map((terms) => terms.map((item) => getFollowRuleItemIdentity("keyword", item))),
     excludeTerms: rule.excludeTerms.map((item) => getFollowRuleItemIdentity("keyword", item))
   });
   if (group.rules.some((rule) => rule.id !== editingRule?.id && ruleIdentity(rule) === ruleIdentity(newRule))) {
@@ -892,8 +1181,9 @@ function addPendingFollowRuleItems() {
   pendingFollowRuleEditor.ruleMode = "all";
   if (keywordInput) keywordInput.value = "";
   if (excludeInput) excludeInput.value = "";
-  renderFollowRuleDialogBody();
-  followRuleDialogBody.querySelector('[data-follow-rule-item-list="items"]')?.focus();
+  if (pendingFollowRuleEditor.inline) showPendingSaveToast();
+  renderPendingFollowRuleEditor();
+  getCurrentFollowRuleEditorRoot()?.querySelector('[data-follow-rule-item-list="items"]')?.focus();
 }
 
 function findFollowRuleItemGroup(type, value, excludedGroupId = "") {
@@ -912,7 +1202,8 @@ function removePendingFollowRuleItem(itemValue, listKey = "items") {
 
   pendingFollowRuleEditor.group[listKey] = pendingFollowRuleEditor.group[listKey]
     .filter((item) => item !== itemValue);
-  renderFollowRuleDialogBody();
+  renderPendingFollowRuleEditor();
+  if (pendingFollowRuleEditor?.inline) showPendingSaveToast();
 }
 
 function removePendingFollowRuleKeywordRule(ruleId) {
@@ -923,7 +1214,8 @@ function removePendingFollowRuleKeywordRule(ruleId) {
     pendingFollowRuleEditor.editingRuleId = "";
     pendingFollowRuleEditor.ruleMode = "all";
   }
-  renderFollowRuleDialogBody();
+  renderPendingFollowRuleEditor();
+  if (pendingFollowRuleEditor?.inline) showPendingSaveToast();
 }
 
 function createFollowRuleStyleEditor(type, styles) {

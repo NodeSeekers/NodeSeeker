@@ -46,6 +46,7 @@ function getKeywordDecoration(sandbox, title, group) {
         rules: entry.rules.map((rule) => ({
           ...rule,
           normalizedItems: rule.terms.map((item) => item.toLocaleLowerCase()),
+          normalizedTermGroups: rule.termGroups.map((terms) => terms.map((item) => item.toLocaleLowerCase())),
           normalizedExcludedItems: rule.excludeTerms.map((item) => item.toLocaleLowerCase())
         }))
       }));
@@ -61,13 +62,19 @@ function getKeywordDecoration(sandbox, title, group) {
 }
 
 function createOptionsSandbox() {
+  const keywordInput = { value: "", focus() {} };
+  const excludeInput = { value: "", focus() {} };
   const node = {
     hidden: false,
     addEventListener() {},
     replaceChildren() {},
     appendChild() {},
     append() {},
-    querySelector() { return null; }
+    querySelector(selector) {
+      if (selector?.includes('data-follow-rule-item-list="items"')) return keywordInput;
+      if (selector?.includes('data-follow-rule-item-list="excludeItems"')) return excludeInput;
+      return null;
+    }
   };
   const sandbox = vm.createContext({
     Set,
@@ -83,6 +90,8 @@ function createOptionsSandbox() {
     }
   });
   vm.runInContext(optionsSource, sandbox);
+  sandbox.__keywordInput = keywordInput;
+  sandbox.__excludeInput = excludeInput;
   return sandbox;
 }
 
@@ -95,11 +104,30 @@ test("legacy content keyword groups keep their saved terms and normalize to RSS-
 
   expect(rules.keywordGroups.map((group) => ({
     id: group.id,
-    rules: group.rules.map(({ terms, mode, excludeTerms }) => ({ terms, mode, excludeTerms }))
+    rules: group.rules.map(({ terms, termGroups, mode, excludeTerms }) => ({ terms, termGroups, mode, excludeTerms }))
   }))).toEqual([
-    { id: "legacy-many", rules: [{ terms: ["VPS", "台湾"], mode: "all", excludeTerms: ["已出"] }] },
-    { id: "legacy-one", rules: [{ terms: ["家宽"], mode: "any", excludeTerms: [] }] }
+    { id: "legacy-many", rules: [{ terms: ["VPS", "台湾"], termGroups: [["VPS"], ["台湾"]], mode: "all", excludeTerms: ["已出"] }] },
+    { id: "legacy-one", rules: [{ terms: ["家宽"], termGroups: [["家宽"]], mode: "all", excludeTerms: [] }] }
   ]);
+});
+
+test("content alias groups are all required while exclusions match substrings", () => {
+  const sandbox = createSandbox();
+  const group = {
+    id: "alias-rule", name: "测试", styles: { showGroupName: true },
+    rules: [{
+      id: "aliases", mode: "all", terms: ["海创", "Hytron", "一折", "1折"],
+      termGroups: [["海创", "Hytron"], ["一折", "1折"]], excludeTerms: []
+    }]
+  };
+
+  expect(getKeywordDecoration(sandbox, "Hytron 一折", group)?.keywordTerms).toEqual(["hytron", "一折"]);
+  expect(getKeywordDecoration(sandbox, "Hytron", group)).toBeNull();
+  const withExcludedSubstring = {
+    ...group,
+    rules: [{ ...group.rules[0], excludeTerms: ["yt"] }]
+  };
+  expect(getKeywordDecoration(sandbox, "Hytron 一折", withExcludedSubstring)).toBeNull();
 });
 
 test("content keyword group keeps independent RSS-style rules and evaluates them as OR", () => {
@@ -158,11 +186,36 @@ test("options editor keeps match mode and excluded terms in the persisted rule v
   }]);
 });
 
-test("content keyword editor splits comma-separated terms like RSS rules", () => {
+test("content keyword editor parses required groups and slash alternatives", () => {
   const sandbox = createOptionsSandbox();
-  const parsed = vm.runInContext('parseFollowRuleEditorItems("台湾, 家宽，台湾\\n云服务器")', sandbox);
+  const parsed = vm.runInContext('parseFollowRuleKeywordExpression("(海创/Hytron),(一折/1折)")', sandbox);
 
-  expect(parsed).toEqual(["台湾", "家宽", "云服务器"]);
+  expect(JSON.parse(JSON.stringify(parsed))).toEqual([["海创", "Hytron"], ["一折", "1折"]]);
+});
+
+test("content keyword editor adds and edits one required-condition rule", () => {
+  const sandbox = createOptionsSandbox();
+  const group = { id: "config-group", rules: [] };
+  sandbox.__group = group;
+  vm.runInContext(`
+    renderFollowRuleDialogBody = () => {};
+    pendingFollowRuleEditor = {
+      type: "keyword", groupId: "config-group", ruleMode: "all", editingRuleId: "", group: __group
+    };
+  `, sandbox);
+  sandbox.__keywordInput.value = "(海创/Hytron),(一折/1折)";
+  sandbox.__excludeInput.value = "出, yt";
+  vm.runInContext("addPendingFollowRuleItems()", sandbox);
+  expect(group.rules).toHaveLength(1);
+  expect(JSON.parse(JSON.stringify(group.rules[0].termGroups))).toEqual([["海创", "Hytron"], ["一折", "1折"]]);
+  expect(group.rules[0].excludeTerms).toEqual(["出", "yt"]);
+
+  vm.runInContext(`pendingFollowRuleEditor.editingRuleId = __group.rules[0].id;`, sandbox);
+  sandbox.__keywordInput.value = "(海创/Hytron),(五折/5折)";
+  sandbox.__excludeInput.value = "出";
+  vm.runInContext("addPendingFollowRuleItems()", sandbox);
+  expect(group.rules).toHaveLength(1);
+  expect(JSON.parse(JSON.stringify(group.rules[0].termGroups))).toEqual([["海创", "Hytron"], ["五折", "5折"]]);
 });
 
 test("quick marking can add and remove one keyword without changing a combined rule", async () => {
