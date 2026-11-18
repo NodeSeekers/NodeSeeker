@@ -12,13 +12,15 @@ let profileActivityHideTimer = 0;
 let profileActivityShowAnchor = null;
 let profileActivityShowTimer = 0;
 
-function scanUserStats() {
+function scanUserStats(roots = null) {
   if (!featureOptions.userStatsEnabled) {
-    removeRenderedProfiles();
     return;
   }
 
-  document.querySelectorAll(".content-item .nsk-content-meta-info").forEach((meta) => {
+  const metadata = Array.isArray(roots)
+    ? collectProfileNodes(roots, ".nsk-content-meta-info")
+    : Array.from(document.querySelectorAll(".content-item .nsk-content-meta-info"));
+  metadata.forEach((meta) => {
     if (meta.closest(".nsh-blocked-content")) {
       return;
     }
@@ -45,8 +47,15 @@ function scanUserStats() {
   });
 }
 
-function scanProfileTrendAvatars() {
-  document.querySelectorAll("a[href*='/space/']").forEach((avatarLink) => {
+function scanProfileTrendAvatars(roots = null) {
+  if (!featureOptions.userStatsEnabled || !featureOptions.profileHoverSignatureEnabled) {
+    return;
+  }
+
+  const avatarLinks = Array.isArray(roots)
+    ? collectProfileNodes(roots, "a[href*='/space/']")
+    : Array.from(document.querySelectorAll("a[href*='/space/']"));
+  avatarLinks.forEach((avatarLink) => {
     if (!isPostListAvatarLink(avatarLink)) {
       return;
     }
@@ -62,6 +71,17 @@ function scanProfileTrendAvatars() {
 
     bindProfileTrendPopup(avatarLink, memberId, getAvatarMemberName(avatarLink, memberId));
   });
+}
+
+function collectProfileNodes(roots, selector) {
+  const nodes = new Set();
+  roots.forEach((root) => {
+    if (root.matches?.(selector)) {
+      nodes.add(root);
+    }
+    root.querySelectorAll?.(selector).forEach((node) => nodes.add(node));
+  });
+  return Array.from(nodes);
 }
 
 function scanProfileProgressTriggers() {

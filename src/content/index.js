@@ -34,23 +34,134 @@ function init() {
   loadFeatureOptions()
     .catch(() => featureOptions)
     .finally(() => {
-      scanBlockFilters();
-      scanFollowRules();
-      scanUserStats();
-      scanProfileTrendAvatars();
-      scanProfileProgressTriggers();
-      scanProfileSpaceActions();
-      scanQuickReplyButton();
-      scanLuckyLinksSafely();
-      scanAttendanceReminder();
-      scanMessageEntry();
-      scanEditorFormattingTools();
-      scanPostSwitcher();
-      scanVisitHistory();
-      scanQuickPhraseButtons();
+      scanPageFeatures();
     });
   initializeAutoPageHistoryGuard();
   observePageChanges();
+}
+
+const CONTENT_SCAN_ITEM_SELECTOR = ".post-list-item, .content-item";
+let pageMutationObserver = null;
+
+function scanPageFeatures() {
+  scanBlockFilters();
+  scanFollowRules();
+  scanUserStats();
+  scanProfileTrendAvatars();
+  scanProfileProgressTriggers();
+  scanProfileSpaceActions();
+  scanQuickReplyButton();
+  scanLuckyLinksSafely();
+  scanAttendanceReminder();
+  scanMessageEntry();
+  scanEditorFormattingTools();
+  scanPostSwitcher();
+  scanVisitHistory();
+  scanQuickPhraseButtons();
+  pageMutationObserver?.takeRecords();
+}
+
+function scanChangedContentItems(items, records) {
+  if (items.length > 0) {
+    scanBlockFilters(items);
+    scanFollowRules(items);
+    if (featureOptions.userStatsEnabled) {
+      scanUserStats(items);
+    }
+    scanProfileTrendAvatars(items);
+    scanVisitHistory(items);
+  }
+
+  if (!getPostSwitcherCurrentPostId() && hasContentItemsAddedOrRemoved(records)) {
+    scanPostSwitcher();
+  }
+}
+
+function getContentItemElement(node) {
+  const element = node?.nodeType === 1 ? node : node?.parentElement;
+  if (!element) {
+    return null;
+  }
+
+  return element.matches?.(CONTENT_SCAN_ITEM_SELECTOR)
+    ? element
+    : element.closest?.(CONTENT_SCAN_ITEM_SELECTOR) || null;
+}
+
+function collectContentMutationItems(records) {
+  const items = new Set();
+  const addAddedNodeItems = (node) => {
+    const element = node?.nodeType === 1 ? node : null;
+    if (!element) {
+      return;
+    }
+
+    const item = getContentItemElement(element);
+    if (item) {
+      items.add(item);
+    }
+    element.querySelectorAll?.(CONTENT_SCAN_ITEM_SELECTOR).forEach((nestedItem) => items.add(nestedItem));
+  };
+
+  records.forEach((record) => {
+    const targetItem = getContentItemElement(record.target);
+    if (targetItem) {
+      items.add(targetItem);
+    }
+    record.addedNodes.forEach(addAddedNodeItems);
+  });
+
+  return Array.from(items);
+}
+
+function isContentOnlyMutationBatch(records) {
+  return records.length > 0 && records.every((record) => {
+    if (getContentItemElement(record.target)) {
+      return true;
+    }
+
+    const changedNodes = [...record.addedNodes, ...record.removedNodes];
+    return changedNodes.length > 0 && changedNodes.every((node) => {
+      if (node.nodeType === 3) {
+        return !String(node.textContent || "").trim();
+      }
+      return isExtensionOwnedElement(node) || nodeContainsContentItem(node);
+    });
+  });
+}
+
+function nodeContainsContentItem(node) {
+  return node?.nodeType === 1 && (
+    node.matches?.(CONTENT_SCAN_ITEM_SELECTOR)
+    || Boolean(node.querySelector?.(CONTENT_SCAN_ITEM_SELECTOR))
+  );
+}
+
+function isExtensionOwnedElement(node) {
+  return node?.nodeType === 1
+    && Array.from(node.classList || []).some((className) => className.startsWith("nsh-"));
+}
+
+function isInsideExtensionElement(node) {
+  const element = node?.nodeType === 1 ? node : node?.parentElement;
+  return Boolean(element?.closest?.('[class*="nsh-"]'));
+}
+
+function isExtensionOwnedMutation(record) {
+  const changedNodes = [...record.addedNodes, ...record.removedNodes];
+  return changedNodes.length > 0 && changedNodes.every((node) => {
+    if (node.nodeType === 3) {
+      return isInsideExtensionElement(record.target);
+    }
+    return isExtensionOwnedElement(node);
+  });
+}
+
+function hasContentItemsAddedOrRemoved(records) {
+  return records.some((record) => {
+    const changedNodes = [...record.addedNodes, ...record.removedNodes];
+    return changedNodes.some(nodeContainsContentItem);
+  });
 }
 
 function handleAutoPageEditorFocusIn(event) {
@@ -308,25 +419,31 @@ function isReadingNavigationDialogTarget(target) {
 
 function observePageChanges() {
   let timer = 0;
-  const observer = new MutationObserver(() => {
+  let pendingRecords = [];
+  const observer = new MutationObserver((records) => {
+    const relevantRecords = records.filter((record) => !isExtensionOwnedMutation(record));
+    if (relevantRecords.length === 0) {
+      return;
+    }
+
+    pendingRecords.push(...relevantRecords);
     window.clearTimeout(timer);
     timer = window.setTimeout(() => {
-      scanBlockFilters();
-      scanFollowRules();
-      scanUserStats();
-      scanProfileTrendAvatars();
-      scanProfileProgressTriggers();
-      scanProfileSpaceActions();
-      scanQuickReplyButton();
-      scanLuckyLinksSafely();
-      scanAttendanceReminder();
-      scanMessageEntry();
-      scanEditorFormattingTools();
-      scanPostSwitcher();
-      scanVisitHistory();
-      scanQuickPhraseButtons();
+      const batch = pendingRecords;
+      pendingRecords = [];
+      try {
+        const items = collectContentMutationItems(batch);
+        if (items.length > 0 && isContentOnlyMutationBatch(batch)) {
+          scanChangedContentItems(items, batch);
+        } else {
+          scanPageFeatures();
+        }
+      } finally {
+        observer.takeRecords();
+      }
     }, 250);
   });
+  pageMutationObserver = observer;
 
   observer.observe(document.body, {
     childList: true,

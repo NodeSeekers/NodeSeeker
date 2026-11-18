@@ -990,30 +990,39 @@ test("new mention and reply notifications are delivered even when already read a
       viewed: 1
     };
     const sent = [];
-    const pageRequests = [];
-    const sandbox = createSandbox(async () => ({
-      ok: true,
-      json: async () => ({ success: true, data: [entry] })
-    }));
+    const requests = [];
+    const sandbox = createSandbox(async (url, options) => {
+      requests.push({ url, options });
+      if (String(url).includes("/api/notification/")) {
+        return { ok: true, json: async () => ({ success: true, data: [entry] }) };
+      }
+      return { ok: true, status: 200, text: async () => "<!doctype html><html></html>" };
+    });
     sandbox.chrome = { storage: { local: {
       get: async (defaults) => ({ ...defaults, ...stored }),
       set: async (values) => Object.assign(stored, values)
     } } };
-    sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
-    sandbox.requestNodeSeekTelegramPage = async (operation, payload) => {
-      pageRequests.push({ operation, payload });
-      return { contents: [{ commentId: "301", quote: "引用的原文", reply: "新回复正文" }] };
+    sandbox.chrome.offscreen = { createDocument: async () => {} };
+    sandbox.chrome.runtime = {
+      getURL: (path) => path,
+      getContexts: async () => [],
+      sendMessage: async (message) => ({ ok: true, result: {
+        contents: message.comments.map((comment) => ({
+          commentId: comment.commentId,
+          quote: "引用的原文",
+          reply: "新回复正文"
+        }))
+      } })
     };
+    sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
     sandbox.sendTelegramActivityNotification = async (_config, sentKind, text) => {
       sent.push({ kind: sentKind, text });
     };
 
     await vm.runInContext(`checkForNewNodeSeekActivity({}, ${JSON.stringify(kind)})`, sandbox);
 
-    expect(pageRequests).toEqual([{
-      operation: "fetch-activity-comment-contents",
-      payload: { comments: [{ postId: "456", commentId: "301", pageNumber: 2 }] }
-    }]);
+    expect(requests.some(({ url, options }) => url === "https://www.nodeseek.com/post-456-2"
+      && options.credentials === "include")).toBe(true);
     expect(sent).toHaveLength(1);
     expect(sent[0].kind).toBe(kind);
     expect(sent[0].text).toContain("引用: 引用的原文");
@@ -1029,16 +1038,20 @@ test("activity extraction failure does not send incomplete alerts or advance the
   };
   const stored = { telegramMentionReplyCursors: { at: { initialized: true, ids: ["11"] } } };
   const sent = [];
-  const sandbox = createSandbox(async () => ({
-    ok: true,
-    json: async () => ({ success: true, data: [entry] })
-  }));
+  const sandbox = createSandbox(async (url) => String(url).includes("/api/notification/")
+    ? { ok: true, json: async () => ({ success: true, data: [entry] }) }
+    : { ok: true, status: 200, text: async () => "<!doctype html><html></html>" });
   sandbox.chrome = { storage: { local: {
     get: async (defaults) => ({ ...defaults, ...stored }),
     set: async (values) => Object.assign(stored, values)
   } } };
+  sandbox.chrome.offscreen = { createDocument: async () => {} };
+  sandbox.chrome.runtime = {
+    getURL: (path) => path,
+    getContexts: async () => [],
+    sendMessage: async () => ({ ok: false, error: "帖子页暂时无法读取" })
+  };
   sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
-  sandbox.requestNodeSeekTelegramPage = async () => { throw new Error("帖子页暂时无法读取"); };
   sandbox.sendTelegramActivityNotification = async (...args) => { sent.push(args); };
 
   await expect(Promise.resolve(vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox)))
@@ -1071,6 +1084,9 @@ test("followed-post extraction failure keeps the private-message cursor for retr
         id: 2, sender_id: "999", receiver_id: "777", sender_name: "系统通知", content: notification
       }] }) };
     }
+    if (url.endsWith("/post-1056233-1")) {
+      return { ok: true, status: 200, text: async () => "<!doctype html><html></html>" };
+    }
     throw new Error(`Unexpected request: ${url}`);
   });
   sandbox.chrome = { storage: { local: {
@@ -1078,7 +1094,12 @@ test("followed-post extraction failure keeps the private-message cursor for retr
     set: async (values) => Object.assign(stored, values)
   } } };
   sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
-  sandbox.requestNodeSeekTelegramPage = async () => { throw new Error("帖子页暂时无法读取"); };
+  sandbox.chrome.offscreen = { createDocument: async () => {} };
+  sandbox.chrome.runtime = {
+    getURL: (path) => path,
+    getContexts: async () => [],
+    sendMessage: async () => ({ ok: false, error: "帖子页暂时无法读取" })
+  };
   sandbox.sendTelegramPrivateMessageToTopics = async (...args) => { sent.push(args); };
 
   await expect(Promise.resolve(vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify({

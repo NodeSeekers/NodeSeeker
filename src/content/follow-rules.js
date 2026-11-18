@@ -819,10 +819,10 @@ function getFollowRuleActionLabel(type) {
   return type === "user" ? "标记用户" : "标记关键字";
 }
 
-function scanFollowRules() {
+function scanFollowRules(roots = null) {
   const rules = getCompiledFollowRules();
   const isDetailPage = isFollowRuleDetailPage();
-  getFollowRuleTargets(isDetailPage).forEach((root) => {
+  getFollowRuleTargets(isDetailPage, roots).forEach((root) => {
     const context = getFollowRuleTargetContext(root, isDetailPage);
     const decoration = context ? getFollowRuleDecoration(context, rules) : null;
     updateFollowRuleDecoration(root, context, decoration);
@@ -861,7 +861,37 @@ function isFollowRuleDetailPage() {
   return /^\/post-\d+(?:-\d+)?$/.test(location.pathname);
 }
 
-function getFollowRuleTargets(isDetailPage) {
+function getFollowRuleTargets(isDetailPage, roots = null) {
+  if (Array.isArray(roots)) {
+    const selector = isDetailPage ? ".content-item" : ".post-list-item";
+    const items = new Set();
+    roots.forEach((root) => {
+      if (root.matches?.(selector)) {
+        items.add(root);
+      }
+      root.querySelectorAll?.(selector).forEach((item) => items.add(item));
+    });
+
+    if (items.size > 0 || isDetailPage) {
+      return Array.from(items);
+    }
+
+    roots.forEach((root) => {
+      if (
+        root.matches?.(".content-item")
+        && root.querySelector(".post-title a[href^='/post-'], .post-title a[href*='/post-']")
+      ) {
+        items.add(root);
+      }
+      root.querySelectorAll?.(".content-item").forEach((item) => {
+        if (item.querySelector(".post-title a[href^='/post-'], .post-title a[href*='/post-']")) {
+          items.add(item);
+        }
+      });
+    });
+    return Array.from(items);
+  }
+
   if (isDetailPage) {
     return Array.from(document.querySelectorAll(".content-item"));
   }

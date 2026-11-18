@@ -1,15 +1,26 @@
-function scanBlockFilters() {
+function scanBlockFilters(roots = null) {
   const rules = getBlockFilterRules();
   const pageMatch = getDetailPageTitleMatch(rules);
   setDetailPageBlockState(pageMatch);
 
-  getBlockFilterTargets().forEach((item) => {
+  getBlockFilterTargets(roots).forEach((item) => {
     setBlockFilterState(item, rules.enabled && matchesBlockFilterItem(item, rules));
   });
 }
 
-function getBlockFilterTargets() {
-  return Array.from(new Set(document.querySelectorAll(".content-item, .post-list-item")));
+function getBlockFilterTargets(roots = null) {
+  if (!Array.isArray(roots)) {
+    return Array.from(new Set(document.querySelectorAll(".content-item, .post-list-item")));
+  }
+
+  const items = new Set();
+  roots.forEach((root) => {
+    if (root.matches?.(".content-item, .post-list-item")) {
+      items.add(root);
+    }
+    root.querySelectorAll?.(".content-item, .post-list-item").forEach((item) => items.add(item));
+  });
+  return Array.from(items);
 }
 
 function handleBlockFilterSelectionMouseUp(event) {
@@ -165,16 +176,27 @@ function getDetailPageBlockContainer() {
 }
 
 function setBlockFilterState(item, blocked) {
-  item.classList.toggle("nsh-blocked-content", blocked);
   if (blocked) {
-    item.dataset.nshBlockedContent = "1";
-    item.setAttribute("aria-hidden", "true");
+    if (!item.classList.contains("nsh-blocked-content")) {
+      item.classList.add("nsh-blocked-content");
+    }
+    if (item.dataset.nshBlockedContent !== "1") {
+      item.dataset.nshBlockedContent = "1";
+    }
+    if (item.getAttribute("aria-hidden") !== "true") {
+      item.setAttribute("aria-hidden", "true");
+    }
     return;
   }
 
+  if (item.classList.contains("nsh-blocked-content")) {
+    item.classList.remove("nsh-blocked-content");
+  }
   if (item.dataset.nshBlockedContent === "1") {
     delete item.dataset.nshBlockedContent;
-    item.removeAttribute("aria-hidden");
+    if (item.getAttribute("aria-hidden") === "true") {
+      item.removeAttribute("aria-hidden");
+    }
   }
 }
 

@@ -1,5 +1,7 @@
 const POST_SWITCHER_STORAGE_KEY = "nshPostSwitcherSequence";
 const POST_SWITCHER_SEQUENCE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const POST_SWITCHER_STORAGE_REFRESH_MS = 60 * 60 * 1000;
+let lastSavedPostSwitcherSequence = null;
 
 function scanPostSwitcher() {
   scanPostSwitcherAsync().catch(() => {
@@ -31,15 +33,27 @@ async function savePostSwitcherSequence() {
     return;
   }
 
+  const now = Date.now();
+  const listUrl = location.href;
+  if (
+    lastSavedPostSwitcherSequence?.listUrl === listUrl
+    && JSON.stringify(lastSavedPostSwitcherSequence.posts) === JSON.stringify(posts)
+    && now - lastSavedPostSwitcherSequence.capturedAt < POST_SWITCHER_STORAGE_REFRESH_MS
+  ) {
+    return;
+  }
+
+  const sequence = { capturedAt: now, listUrl, posts };
+  const previousSequence = lastSavedPostSwitcherSequence;
+  lastSavedPostSwitcherSequence = sequence;
   try {
     await chrome.storage.local.set({
-      [POST_SWITCHER_STORAGE_KEY]: {
-        capturedAt: Date.now(),
-        listUrl: location.href,
-        posts
-      }
+      [POST_SWITCHER_STORAGE_KEY]: sequence
     });
   } catch {
+    if (lastSavedPostSwitcherSequence === sequence) {
+      lastSavedPostSwitcherSequence = previousSequence;
+    }
     // Ignore storage failures; the switcher can simply stay hidden on detail pages.
   }
 }
@@ -196,6 +210,7 @@ function removePostSwitcherButton(direction) {
 }
 
 async function clearPostSwitcherSequence() {
+  lastSavedPostSwitcherSequence = null;
   try {
     await chrome.storage.local.remove(POST_SWITCHER_STORAGE_KEY);
   } catch {

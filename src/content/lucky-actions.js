@@ -120,8 +120,14 @@ function mountLuckyButton(button, buttonGroup) {
 }
 
 function scanQuickReplyButton() {
+  if (!/^\/post-\d+(?:-\d+)?$/.test(location.pathname)) {
+    removeQuickReplyButton();
+    return;
+  }
+
+  const editor = findQuickReplyEditor();
   const buttonGroup = findLuckyButtonGroup();
-  if (!buttonGroup || !findQuickReplyEditor()) {
+  if (!buttonGroup || !editor) {
     removeQuickReplyButton();
     return;
   }

@@ -1,9 +1,11 @@
 let visitHistorySaveKey = "";
 let visitHistoryStyleRequestId = 0;
 
-function scanVisitHistory() {
-  saveCurrentVisitHistory();
-  markVisitedPostTitles();
+function scanVisitHistory(roots = null) {
+  if (!Array.isArray(roots)) {
+    saveCurrentVisitHistory();
+  }
+  markVisitedPostTitles(roots);
 }
 
 async function saveCurrentVisitHistory() {
@@ -41,8 +43,8 @@ async function saveCurrentVisitHistory() {
   }
 }
 
-async function markVisitedPostTitles() {
-  const entries = collectVisitHistoryListEntries();
+async function markVisitedPostTitles(roots = null) {
+  const entries = collectVisitHistoryListEntries(roots);
   if (entries.length === 0) {
     return;
   }
@@ -64,8 +66,11 @@ async function markVisitedPostTitles() {
   }
 }
 
-function collectVisitHistoryListEntries() {
-  return Array.from(document.querySelectorAll(".post-list-item, .content-item"))
+function collectVisitHistoryListEntries(roots = null) {
+  const items = Array.isArray(roots)
+    ? collectVisitHistoryItems(roots)
+    : Array.from(document.querySelectorAll(".post-list-item, .content-item"));
+  return items
     .map((item) => {
       const titleLink = item.querySelector(".post-title a[href^='/post-'], .post-title a[href*='/post-']")
         || item.querySelector("a[href^='/post-'], a[href*='/post-']");
@@ -74,6 +79,17 @@ function collectVisitHistoryListEntries() {
       return titleLink && url?.origin === location.origin && postId ? { titleLink, postId } : null;
     })
     .filter(Boolean);
+}
+
+function collectVisitHistoryItems(roots) {
+  const items = new Set();
+  roots.forEach((root) => {
+    if (root.matches?.(".post-list-item, .content-item")) {
+      items.add(root);
+    }
+    root.querySelectorAll?.(".post-list-item, .content-item").forEach((item) => items.add(item));
+  });
+  return Array.from(items);
 }
 
 function getVisitHistoryCurrentTitle() {

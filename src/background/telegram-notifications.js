@@ -146,6 +146,8 @@ const TELEGRAM_UPDATES_LONG_POLL_TIMEOUT_SECONDS = 20;
 const TELEGRAM_UPDATES_RETRY_MAX_MS = 30 * 1000;
 const TELEGRAM_REQUEST_TIMEOUT_MS = 15 * 1000;
 const TELEGRAM_FILE_REQUEST_TIMEOUT_MS = 30 * 1000;
+const TELEGRAM_OFFSCREEN_PARSER_PATH = "src/background/telegram-offscreen.html";
+const TELEGRAM_OFFSCREEN_PARSER_TARGET = "nsh:telegram-offscreen";
 const TELEGRAM_ACTIVITY_ENDPOINTS = Object.freeze({
   at: "/api/notification/at-me/list",
   reply: "/api/notification/reply-to-me/list"
@@ -166,6 +168,7 @@ let telegramUpdatesAbortController = null;
 let telegramUpdatesActiveToken = "";
 let telegramUpdatesFailureCount = 0;
 let telegramSettingsCallbacksReady = false;
+let telegramOffscreenParserSetupPromise = null;
 const telegramUpdateBatchWaiters = new Set();
 const TELEGRAM_BOARD_NAMES = {
   daily: "日常",
@@ -1112,17 +1115,85 @@ async function fetchTelegramActivityCommentContents(entries) {
     .filter(Boolean);
   if (comments.length === 0) return new Map();
 
-  const result = await requestNodeSeekTelegramPage("fetch-activity-comment-contents", { comments });
-  const contents = new Map((Array.isArray(result?.contents) ? result.contents : [])
-    .filter((item) => normalizeTelegramActivityId(item?.commentId)
-      && (typeof item?.quote === "string" || typeof item?.reply === "string"))
-    .map((item) => [normalizeTelegramActivityId(item.commentId), {
-      quote: String(item.quote || ""),
-      reply: String(item.reply || "")
-    }]));
+  const pageGroups = new Map();
+  for (const comment of comments) {
+    const key = `${comment.postId}:${comment.pageNumber}`;
+    if (!pageGroups.has(key)) pageGroups.set(key, []);
+    pageGroups.get(key).push(comment);
+  }
+
+  const contents = new Map();
+  for (const pageComments of pageGroups.values()) {
+    const { postId, pageNumber } = pageComments[0];
+    const html = await fetchTelegramPostPageHtml({ postId, pageNumber }, "通知帖子");
+    const result = await parseTelegramPostHtmlInOffscreen("parse-activity-comments", html, pageComments);
+    for (const item of Array.isArray(result?.contents) ? result.contents : []) {
+      const commentId = normalizeTelegramActivityId(item?.commentId);
+      if (!commentId || (typeof item?.quote !== "string" && typeof item?.reply !== "string")) continue;
+      contents.set(commentId, { quote: String(item.quote || ""), reply: String(item.reply || "") });
+    }
+  }
+
   const missingComment = comments.find((comment) => !contents.has(comment.commentId));
   if (missingComment) throw new Error("NodeSeek 通知楼层正文缺失，稍后重试");
   return contents;
+}
+
+async function fetchTelegramPostPageHtml(reference, label) {
+  const postId = normalizeTelegramActivityId(reference?.postId);
+  const pageNumber = Number(reference?.pageNumber);
+  if (!postId || !Number.isSafeInteger(pageNumber) || pageNumber < 1) {
+    throw new Error("NodeSeek 帖子编号无效");
+  }
+
+  const url = `https://www.nodeseek.com/post-${postId}-${pageNumber}`;
+  const response = await fetchWithTimeout(url, {
+    credentials: "include",
+    cache: "no-store",
+    headers: { Accept: "text/html" }
+  });
+  if (!response.ok) throw new Error(`读取${label}失败（HTTP ${response.status}）`);
+  const html = await response.text();
+  if (!/<(?:!doctype\s+html|html)\b/i.test(html)) throw new Error(`读取${label}时未返回帖子页面`);
+  return html;
+}
+
+async function parseTelegramPostHtmlInOffscreen(operation, html, comments = []) {
+  await ensureTelegramOffscreenParser();
+  const response = await chrome.runtime.sendMessage({
+    target: TELEGRAM_OFFSCREEN_PARSER_TARGET,
+    operation,
+    html,
+    comments
+  });
+  if (!response?.ok) throw new Error(String(response?.error || "解析 NodeSeek 帖子正文失败"));
+  return response.result;
+}
+
+async function ensureTelegramOffscreenParser() {
+  if (!chrome.offscreen?.createDocument || typeof chrome.runtime.getContexts !== "function") {
+    throw new Error("当前浏览器不支持后台解析帖子正文");
+  }
+  if (telegramOffscreenParserSetupPromise) return telegramOffscreenParserSetupPromise;
+
+  telegramOffscreenParserSetupPromise = (async () => {
+    const documentUrl = chrome.runtime.getURL(TELEGRAM_OFFSCREEN_PARSER_PATH);
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [documentUrl]
+    });
+    if (contexts.length > 0) return;
+
+    await chrome.offscreen.createDocument({
+      url: TELEGRAM_OFFSCREEN_PARSER_PATH,
+      reasons: ["DOM_PARSER"],
+      justification: "Parse NodeSeek post HTML to extract notification titles, quotes, and reply text."
+    });
+  })().catch((error) => {
+    telegramOffscreenParserSetupPromise = null;
+    throw error;
+  });
+  return telegramOffscreenParserSetupPromise;
 }
 
 async function saveTelegramActivityCursor(kind, discoveredIds, previousCursor) {
@@ -1808,7 +1879,8 @@ function extractNodeSeekSystemPostReference(value) {
 async function fetchTelegramSystemNotificationPostContent(value) {
   const reference = extractNodeSeekSystemPostReference(value);
   if (!reference) throw new Error("无法识别关注帖链接，稍后重试");
-  const result = await requestNodeSeekTelegramPage("fetch-system-post-content", reference);
+  const html = await fetchTelegramPostPageHtml(reference, "关注帖");
+  const result = await parseTelegramPostHtmlInOffscreen("parse-system-post", html);
   const title = normalizeTelegramMessageBody(result?.title || "").slice(0, 300);
   const body = typeof result?.body === "string"
     ? normalizeTelegramMessageBody(result.body).slice(0, 2400)
@@ -3317,9 +3389,13 @@ async function sendNodeSeekPrivateMessage(receiverUid, content, markdown = false
 
 }
 
-async function requestNodeSeekTelegramPage(operation, payload = {}) {
-  const matchingTabs = await chrome.tabs.query({ url: "https://www.nodeseek.com/*" });
-  let tab = matchingTabs.find((candidate) => candidate.status === "complete") || matchingTabs[0] || null;
+async function requestNodeSeekTelegramPage(operation, payload = {}, { forceFreshTab = false } = {}) {
+  const matchingTabs = forceFreshTab
+    ? []
+    : await chrome.tabs.query({ url: "https://www.nodeseek.com/*" });
+  let tab = matchingTabs.find((candidate) => !candidate.discarded && candidate.status === "complete")
+    || matchingTabs.find((candidate) => !candidate.discarded)
+    || null;
   let createdTabId = 0;
   if (!tab) {
     tab = await chrome.tabs.create({ url: "https://www.nodeseek.com/notification", active: false });
@@ -3345,10 +3421,17 @@ async function requestNodeSeekTelegramPage(operation, payload = {}) {
       }
       if (attempt < 11) await new Promise((resolve) => setTimeout(resolve, 250));
     }
+    if (!createdTabId && isTelegramNodeSeekPageReceiverUnavailable(lastError)) {
+      return await requestNodeSeekTelegramPage(operation, payload, { forceFreshTab: true });
+    }
     throw new Error(lastError?.message || "无法连接 NodeSeek 页面");
   } finally {
     if (createdTabId) await chrome.tabs.remove(createdTabId).catch(() => {});
   }
+}
+
+function isTelegramNodeSeekPageReceiverUnavailable(error) {
+  return /Receiving end does not exist|Could not establish connection/i.test(String(error?.message || ""));
 }
 
 function waitForNodeSeekTelegramTab(tab) {

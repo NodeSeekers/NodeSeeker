@@ -84,9 +84,10 @@
   "permissions": [
     "alarms",
     "notifications",
+    "offscreen",
     "scripting",
     "storage",
     "unlimitedStorage"
   ],
-  "version": "1.1.21"
+  "version": "1.1.24"
 }
