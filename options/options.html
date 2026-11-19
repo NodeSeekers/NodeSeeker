@@ -635,9 +635,10 @@
               </span>
             </label>
             <label id="autoPageDelayOption" class="auto-page-delay-option">
-              <span>翻页延迟（毫秒）</span>
-              <input id="autoPageDelayMs" name="autoPageDelayMs" type="number" min="0" step="1" value="100" required>
+              <span>边缘等待（毫秒）</span>
+              <input id="autoPageDelayMs" name="autoPageDelayMs" aria-describedby="autoPageDelayHint" type="number" min="0" step="1" value="200" required>
             </label>
+            <p id="autoPageDelayHint" class="config-description">在页首或页尾停稳至设定时间后，再朝同一方向滚动一小段即可翻页。瀑布流停稳至设定时间后自动追加。</p>
           </section>
 
           <section class="config-group" aria-labelledby="readingShortcutTitle">

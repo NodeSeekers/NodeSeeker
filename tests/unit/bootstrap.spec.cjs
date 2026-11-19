@@ -12,7 +12,7 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
-test("startup preserves the private-message cursor when offline sync is enabled and resets it when disabled", async () => {
+test("startup preserves all NodeSeek cursors when offline sync is enabled and resets them when disabled", async () => {
   const scheduled = [];
   const storage = {};
   const sandbox = vm.createContext({
@@ -31,8 +31,8 @@ test("startup preserves the private-message cursor when offline sync is enabled 
   await vm.runInContext("scheduleTelegramMonitorForLifecycle({ checkImmediately: true })", sandbox);
 
   expect(scheduled).toEqual([
-    { resetMessageBaseline: false, checkImmediately: true },
-    { resetMessageBaseline: true, checkImmediately: true }
+    { resetMessageBaseline: false, resetMentionBaseline: false, resetReplyBaseline: false, resetPostBaseline: false, checkImmediately: true },
+    { resetMessageBaseline: true, resetMentionBaseline: true, resetReplyBaseline: true, resetPostBaseline: true, checkImmediately: true }
   ]);
 });
 

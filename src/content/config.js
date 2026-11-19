@@ -63,7 +63,7 @@ const DEFAULT_OPTIONS = {
   postSwitcherEnabled: true,
   autoPageEnabled: true,
   autoPageAppendEnabled: true,
-  autoPageDelayMs: 100,
+  autoPageDelayMs: 200,
   ...DEFAULT_READING_SHORTCUTS,
   quickPhrasesEnabled: true,
   quickPhrases: [],
@@ -118,7 +118,7 @@ let autoPageBottomArmed = false;
 let autoPageTopArmed = false;
 let autoPageBottomArmTimer = 0;
 let autoPageTopArmTimer = 0;
-let autoPageTouchStartY = 0;
+let autoPageTouchStartY = null;
 let autoPageAppendLoading = false;
 let autoPageAppendInitialized = false;
 let autoPageAppendBaseUrl = "";

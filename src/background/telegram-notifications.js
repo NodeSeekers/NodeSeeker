@@ -727,6 +727,7 @@ function getTelegramBaselineResetOptions(changes, currentConfig) {
 }
 
 async function checkTelegramNotifications() {
+  if (typeof telegramMonitorStartupReady !== "undefined") await telegramMonitorStartupReady;
   const config = await chrome.storage.local.get({
     [TELEGRAM_KEYS.token]: "",
     [TELEGRAM_KEYS.targets]: [],
@@ -816,6 +817,7 @@ async function checkTelegramNotifications() {
 }
 
 async function checkTelegramRssNotifications() {
+  if (typeof telegramMonitorStartupReady !== "undefined") await telegramMonitorStartupReady;
   if (telegramRssCheckInFlight) return;
   telegramRssCheckInFlight = true;
   try {
@@ -3088,7 +3090,7 @@ async function removeTelegramSettingsReplyKeyboard(tokenValue, chatIdValue, topi
 }
 
 function isTelegramTopicNotFoundError(error) {
-  return /message thread not found|topic(?:\s+or\s+thread)? not found/i.test(String(error?.message || ""));
+  return /message thread not found|topic(?:\s+or\s+thread)? not found|\bTOPIC_ID_INVALID\b/i.test(String(error?.message || ""));
 }
 
 function recreateTelegramTopic(tokenValue, chatIdValue, oldTopicIdValue, topicReference = null) {

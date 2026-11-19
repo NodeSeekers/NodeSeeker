@@ -1299,8 +1299,8 @@ function renderTelegramOfflineMessageSync(config) {
   button.setAttribute("aria-checked", String(enabled));
   button.setAttribute("aria-label", `离线消息：${enabled ? "已开启" : "已关闭"}`);
   button.title = enabled
-    ? "浏览器重新启动后补发离线期间的新私信"
-    : "浏览器重新启动后跳过离线期间的新私信";
+    ? "浏览器重新启动后补发离线期间的 NodeSeek 消息和通知"
+    : "浏览器重新启动后跳过离线期间的 NodeSeek 消息和通知";
 }
 
 async function toggleTelegramSilentPush() {

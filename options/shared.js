@@ -61,7 +61,7 @@ const DEFAULT_OPTIONS = {
   postSwitcherEnabled: true,
   autoPageEnabled: true,
   autoPageAppendEnabled: true,
-  autoPageDelayMs: 100,
+  autoPageDelayMs: 200,
   ...DEFAULT_READING_SHORTCUTS,
   quickPhrasesEnabled: true,
   quickPhrases: [],

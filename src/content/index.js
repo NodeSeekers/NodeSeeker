@@ -18,6 +18,8 @@ function init() {
   window.addEventListener("wheel", handleAutoPageWheel, { passive: true });
   window.addEventListener("touchstart", handleAutoPageTouchStart, { passive: true });
   window.addEventListener("touchmove", handleAutoPageTouchMove, { passive: true });
+  window.addEventListener("touchend", handleAutoPageTouchEnd, { passive: true });
+  window.addEventListener("touchcancel", handleAutoPageTouchEnd, { passive: true });
   window.addEventListener("pageshow", handleAutoPageShow);
   window.addEventListener("pageshow", scanVisitHistory);
   window.addEventListener("scroll", handleAutoPageScroll, { passive: true });
@@ -362,7 +364,9 @@ function handleStorageChanged(changes, areaName) {
       ) {
         resetAutoPageEdgeArming();
         resetAutoPageAppendState();
-        autoPageTouchStartY = 0;
+        autoPageTouchStartY = null;
+        autoPageTouchCanGoNext = false;
+        autoPageTouchCanGoPrevious = false;
       }
     })
     .catch(() => {});

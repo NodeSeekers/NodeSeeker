@@ -2189,7 +2189,10 @@ test("concurrent stale-topic sends reuse one replacement and deleting an unrelat
       creations++;
       return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_thread_id: 444 } }) };
     }
-    if (method === "deleteForumTopic" || body.message_thread_id === 111) {
+    if (method === "deleteForumTopic") {
+      return { ok: false, status: 400, json: async () => ({ ok: false, description: "Bad Request: TOPIC_ID_INVALID" }) };
+    }
+    if (body.message_thread_id === 111) {
       return { ok: false, status: 400, json: async () => ({ ok: false, description: "Bad Request: message thread not found" }) };
     }
     delivered.push(body);
@@ -2208,4 +2211,21 @@ test("concurrent stale-topic sends reuse one replacement and deleting an unrelat
   expect(creations).toBe(1);
   expect(delivered.map((item) => item.message_thread_id)).toEqual([444, 444]);
   expect(stored.telegramManagedTopics.map((topic) => [topic.id, topic.topicId])).toEqual([["reply", "444"]]);
+});
+
+test("startup blocks notification polls until the offline baselines are installed", async () => {
+  const sandbox = createSandbox();
+  const reads = [];
+  let ready;
+  sandbox.telegramMonitorStartupReady = new Promise((resolve) => { ready = resolve; });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => { reads.push(Object.keys(defaults)); return defaults; }
+  } } };
+
+  const checks = vm.runInContext("Promise.all([checkTelegramNotifications(), checkTelegramRssNotifications()])", sandbox);
+  await Promise.resolve();
+  expect(reads).toHaveLength(0);
+  ready();
+  await checks;
+  expect(reads).toHaveLength(2);
 });

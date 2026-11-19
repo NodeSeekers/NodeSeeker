@@ -95,7 +95,7 @@ test("a late page response cannot append after waterfall is disabled", async () 
     featureOptions: { readingNavigationEnabled: true, autoPageEnabled: true, autoPageAppendEnabled: true },
     autoPageAppendLoadedUrls: new Set(),
     autoPageAppendLoading: false, autoPageAppendInitialized: false, autoPageAppendBaseUrl: "",
-    autoPageAppendNextUrl: "", autoPageTouchStartY: 0, autoPageEdgeState: {},
+    autoPageAppendNextUrl: "", autoPageTouchStartY: null, autoPageEdgeState: {},
     document: { querySelector: () => null },
     DOMParser: class { parseFromString() { parses++; } },
     fetch: () => new Promise((resolve) => { releaseResponse = resolve; })

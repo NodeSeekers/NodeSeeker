@@ -1,20 +1,23 @@
 const TELEGRAM_WORKER_SESSION_KEY = "telegramMonitorWorkerSessionInitialized";
 
 backupRecoveryAtStartup = recoverInterruptedFullBackup();
+const telegramMonitorStartupReady = backupRecoveryAtStartup.then(() =>
+  runBackgroundOperation(scheduleTelegramMonitorAlarmForWorkerStart));
+telegramMonitorStartupReady.catch((error) => {
+  console.warn("Telegram worker startup setup failed:", error?.message || "unknown error");
+});
+
 backupRecoveryAtStartup.then(() => {
   runBackgroundOperation(discardLegacyStorage).catch(() => {});
   scheduleLuckyNotificationAlarmSync();
   scheduleProfileRetentionPrune();
-  runBackgroundOperation(scheduleTelegramMonitorAlarmForWorkerStart).catch((error) => {
-    console.warn("Telegram worker startup setup failed:", error?.message || "unknown error");
-  });
   runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
 }).catch((error) => console.error("Backup recovery failed:", error?.message || "unknown error"));
 
 async function scheduleTelegramMonitorAlarmForWorkerStart() {
   const sessionStorage = chrome.storage.session;
   if (!sessionStorage?.get || !sessionStorage?.set) {
-    return scheduleTelegramMonitorAlarm();
+    return scheduleTelegramMonitorForLifecycle({ checkImmediately: true });
   }
 
   const sessionState = await sessionStorage.get({ [TELEGRAM_WORKER_SESSION_KEY]: false });
@@ -22,19 +25,19 @@ async function scheduleTelegramMonitorAlarmForWorkerStart() {
     return scheduleTelegramMonitorAlarm();
   }
 
+  await scheduleTelegramMonitorForLifecycle({ checkImmediately: true });
   await sessionStorage.set({ [TELEGRAM_WORKER_SESSION_KEY]: true });
-  return scheduleTelegramMonitorForLifecycle({ checkImmediately: true });
 }
 
 function scheduleTelegramMonitorForLifecycle({ checkImmediately = false } = {}) {
   return chrome.storage.local.get({ telegramOfflineMessageSyncEnabled: true })
     .then((config) => scheduleTelegramMonitorAlarm({
       resetMessageBaseline: config.telegramOfflineMessageSyncEnabled === false,
+      resetMentionBaseline: config.telegramOfflineMessageSyncEnabled === false,
+      resetReplyBaseline: config.telegramOfflineMessageSyncEnabled === false,
+      resetPostBaseline: config.telegramOfflineMessageSyncEnabled === false,
       checkImmediately
-    }))
-    .catch((error) => {
-      console.warn("Telegram lifecycle check setup failed:", error?.message || "unknown error");
-    });
+    }));
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -46,7 +49,7 @@ chrome.runtime.onInstalled.addListener((details) => {
       runBackgroundOperation(discardLegacyStorage).catch(() => {});
       scheduleLuckyNotificationAlarmSync();
       scheduleProfileRetentionPrune();
-      runBackgroundOperation(scheduleTelegramMonitorAlarm).catch(() => {});
+      telegramMonitorStartupReady.then(() => runBackgroundOperation(scheduleTelegramMonitorAlarm)).catch(() => {});
       runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
     });
 });
@@ -54,7 +57,6 @@ chrome.runtime.onStartup.addListener(() => {
   runBackgroundOperation(discardLegacyStorage).catch(() => {});
   scheduleLuckyNotificationAlarmSync();
   scheduleProfileRetentionPrune();
-  runBackgroundOperation(scheduleTelegramMonitorAlarm).catch(() => {});
   runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
 });
 

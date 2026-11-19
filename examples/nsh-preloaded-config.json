@@ -31,7 +31,7 @@
     "postSwitcherEnabled": true,
     "autoPageEnabled": true,
     "autoPageAppendEnabled": true,
-    "autoPageDelayMs": 100,
+    "autoPageDelayMs": 200,
     "postPagePreviousShortcut": "Alt+Shift+ArrowUp",
     "postPageNextShortcut": "Alt+Shift+ArrowDown",
     "postSwitcherPreviousShortcut": "Alt+Shift+ArrowLeft",

@@ -1,7 +1,17 @@
+const AUTO_PAGE_WHEEL_CONFIRM_PIXELS = 24;
+const AUTO_PAGE_WHEEL_CONFIRM_BURST_MS = 120;
+let autoPageWheelConfirmation = null;
+
+let autoPageTouchCanGoNext = false;
+let autoPageTouchCanGoPrevious = false;
+let autoPageTouchHandled = false;
+
 function handleAutoPageWheel(event) {
   if (
     !isAutoPageEnabled()
+    || event.ctrlKey
     || event.deltaY === 0
+    || Math.abs(event.deltaX || 0) > Math.abs(event.deltaY)
     || (isEditableScrollTarget(event.target) && isAutoPageEditableTargetFocused(event.target))
   ) {
     return;
@@ -15,33 +25,52 @@ function handleAutoPageWheel(event) {
 
   autoPageWaitForReplyScroll = false;
 
-  if (event.deltaY > 0) {
-    tryAutoPageNext();
-  } else {
-    tryAutoPagePrevious();
-  }
+  const edge = event.deltaY > 0 ? "bottom" : "top";
+  disarmAutoPageEdge(edge === "bottom" ? "top" : "bottom");
+  const armed = edge === "bottom" ? autoPageBottomArmed : autoPageTopArmed;
+  const atEdge = edge === "bottom" ? isAtPageBottom() : isAtPageTop();
+  if (armed && atEdge && !(edge === "bottom" && isAutoPageAppendEnabled())
+      && !confirmAutoPageWheelIntent(event, edge)) return;
+  if (edge === "bottom") tryAutoPageNext();
+  else tryAutoPagePrevious();
+}
+
+function confirmAutoPageWheelIntent(event, edge) {
+  const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+  const now = performance.now();
+  const previous = autoPageWheelConfirmation;
+  const carried = previous?.edge === edge && now - previous.at <= AUTO_PAGE_WHEEL_CONFIRM_BURST_MS
+    ? previous.pixels : 0;
+  const pixels = carried + Math.abs(event.deltaY) * scale;
+  autoPageWheelConfirmation = { edge, at: now, pixels };
+  return pixels >= AUTO_PAGE_WHEEL_CONFIRM_PIXELS;
 }
 
 function handleAutoPageTouchStart(event) {
-  if (!isAutoPageEnabled()) {
-    autoPageTouchStartY = 0;
+  autoPageTouchCanGoNext = false;
+  autoPageTouchCanGoPrevious = false;
+  autoPageTouchHandled = false;
+  if (!isAutoPageEnabled() || event.touches?.length !== 1 || isEditableScrollTarget(event.target)) {
+    autoPageTouchStartY = null;
+    resetAutoPageEdgeArming();
     return;
   }
 
-  autoPageTouchStartY = event.touches?.[0]?.clientY || 0;
+  autoPageTouchStartY = event.touches[0].clientY;
+  autoPageTouchCanGoNext = autoPageBottomArmed && isAtPageBottom();
+  autoPageTouchCanGoPrevious = autoPageTopArmed && isAtPageTop();
+  // A finger still on the screen belongs to the current gesture.
+  resetAutoPageEdgeArming();
 }
 
 function handleAutoPageTouchMove(event) {
-  if (!isAutoPageEnabled() || !autoPageTouchStartY || isEditableScrollTarget(event.target)) {
-    return;
-  }
+  if (!isAutoPageEnabled() || autoPageTouchStartY == null || autoPageTouchHandled
+      || event.touches?.length !== 1 || isEditableScrollTarget(event.target)) return;
 
-  const currentY = event.touches?.[0]?.clientY || autoPageTouchStartY;
-  const deltaY = autoPageTouchStartY - currentY;
-  if (Math.abs(deltaY) < AUTO_PAGE_TOUCH_THRESHOLD) {
-    return;
-  }
+  const deltaY = autoPageTouchStartY - event.touches[0].clientY;
+  if (Math.abs(deltaY) < AUTO_PAGE_TOUCH_THRESHOLD) return;
 
+  autoPageTouchHandled = true;
   if (hasAutoPageReplyDraft()) {
     autoPageWaitForReplyScroll = true;
     resetAutoPageEdgeArming();
@@ -49,17 +78,28 @@ function handleAutoPageTouchMove(event) {
   }
 
   autoPageWaitForReplyScroll = false;
-
-  if (deltaY > 0) {
+  if (deltaY > 0 && autoPageTouchCanGoNext && !isAutoPageAppendEnabled()) {
+    autoPageBottomArmed = true;
     tryAutoPageNext();
-  } else {
+  } else if (deltaY < 0 && autoPageTouchCanGoPrevious) {
+    autoPageTopArmed = true;
     tryAutoPagePrevious();
   }
 }
 
+function handleAutoPageTouchEnd(event) {
+  if (event.touches?.length) return;
+  const wasTracked = autoPageTouchStartY != null;
+  autoPageTouchStartY = null;
+  autoPageTouchCanGoNext = false;
+  autoPageTouchCanGoPrevious = false;
+  resetAutoPageEdgeArming();
+  if (wasTracked && event.type !== "touchcancel") handleAutoPageScroll();
+}
+
 function handleAutoPageShow(event) {
   autoPageNavigating = false;
-  autoPageTouchStartY = 0;
+  autoPageTouchStartY = null;
   resetAutoPageEdgeArming();
   guardAutoPageAfterHistoryRestore(event.persisted);
 }
@@ -87,10 +127,6 @@ function handleAutoPageScroll() {
 
   if (autoPageRequiresTopReset && !isAtPageTop()) {
     autoPageRequiresTopReset = false;
-  }
-
-  if (isAutoPageAppendEnabled()) {
-    tryAutoPageNext();
   }
 }
 
@@ -199,7 +235,7 @@ function tryAutoPageNext() {
 }
 
 function tryAutoPagePrevious() {
-  if (!isAutoPageEnabled() || autoPageNavigating || autoPageAppendLoading || autoPageRequiresTopReset || !isAtPageTop()) {
+  if (!isAutoPageEnabled() || isReplyEditorActive() || hasAutoPageReplyDraft() || autoPageNavigating || autoPageAppendLoading || autoPageRequiresTopReset || !isAtPageTop()) {
     return;
   }
 
@@ -250,6 +286,9 @@ function getPreviousAutoPageUrl(root = document, currentUrl = new URL(location.h
 }
 
 function scheduleAutoPageEdgeArm(edge) {
+  if (autoPageTouchStartY != null) return;
+  const append = edge === "bottom" && isAutoPageAppendEnabled();
+  const delay = featureOptions.autoPageDelayMs;
   if (edge === "bottom") {
     if (autoPageBottomArmed) {
       return;
@@ -259,8 +298,11 @@ function scheduleAutoPageEdgeArm(edge) {
     autoPageBottomArmTimer = window.setTimeout(() => {
       autoPageBottomArmed = isAtPageBottom();
       autoPageBottomArmTimer = 0;
-      if (autoPageBottomArmed) tryAutoPageNext();
-    }, featureOptions.autoPageDelayMs);
+      if (append && autoPageBottomArmed) {
+        tryAutoPageNext();
+        autoPageBottomArmed = false;
+      }
+    }, delay);
     return;
   }
 
@@ -272,11 +314,11 @@ function scheduleAutoPageEdgeArm(edge) {
   autoPageTopArmTimer = window.setTimeout(() => {
     autoPageTopArmed = isAtPageTop();
     autoPageTopArmTimer = 0;
-    if (autoPageTopArmed) tryAutoPagePrevious();
-  }, featureOptions.autoPageDelayMs);
+  }, delay);
 }
 
 function disarmAutoPageEdge(edge) {
+  if (autoPageWheelConfirmation?.edge === edge) autoPageWheelConfirmation = null;
   if (edge === "bottom") {
     autoPageBottomArmed = false;
     window.clearTimeout(autoPageBottomArmTimer);
@@ -357,7 +399,7 @@ function appendNextAutoPage(pageUrl) {
       if (autoPageAppendRequest !== request) return;
       autoPageAppendRequest = null;
       autoPageAppendLoading = false;
-      autoPageTouchStartY = 0;
+      autoPageTouchStartY = null;
     });
 }
 
@@ -634,7 +676,7 @@ function navigateToPostPage(pageUrl) {
 }
 
 function isAtPageTop() {
-  return window.scrollY <= AUTO_PAGE_BOTTOM_THRESHOLD;
+  return window.scrollY <= 1;
 }
 
 function isAtPageBottom() {
@@ -647,7 +689,8 @@ function isAtPageBottom() {
     body?.offsetHeight || 0
   );
 
-  return window.scrollY + window.innerHeight >= scrollHeight - AUTO_PAGE_BOTTOM_THRESHOLD;
+  const threshold = isAutoPageAppendEnabled() ? AUTO_PAGE_BOTTOM_THRESHOLD : 1;
+  return window.scrollY + window.innerHeight >= scrollHeight - threshold;
 }
 
 function getNextPostPageUrl(root = document, currentUrl = new URL(location.href)) {

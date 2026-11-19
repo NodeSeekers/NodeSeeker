@@ -20,6 +20,8 @@ function createAutoPageSandbox(editorValue = "", { hasCodeMirror = true, fallbac
   const body = { closest: () => null };
   const sandbox = vm.createContext({
     AUTO_PAGE_TOUCH_THRESHOLD: 24,
+    performance: { now: () => 1000 },
+    autoPageTouchStartY: null,
     AUTO_PAGE_BOTTOM_THRESHOLD: 120,
     autoPageBottomArmTimer: 0,
     autoPageBottomArmed: true,
@@ -92,6 +94,8 @@ function createEdgeTriggerSandbox({ appendEnabled = true, editorFocused = false 
   const activeElement = editorFocused ? editor : body;
   const sandbox = vm.createContext({
     AUTO_PAGE_TOUCH_THRESHOLD: 24,
+    performance: { now: () => 1000 },
+    autoPageTouchStartY: null,
     autoPageBottomArmTimer: 0,
     autoPageBottomArmed: false,
     autoPageNavigating: false,
@@ -132,6 +136,7 @@ function createEdgeTriggerSandbox({ appendEnabled = true, editorFocused = false 
   sandbox.isAtPageBottom = () => true;
   sandbox.isAtPageTop = () => false;
   sandbox.getNextAutoPageUrlForCurrentMode = () => "/post-123-2";
+  sandbox.getPreviousAutoPageUrl = () => "/post-123-1";
   sandbox.appendNextAutoPage = () => { appendCount += 1; };
   sandbox.navigateToPostPage = (url) => { navigatedUrl = url; };
   return {
@@ -155,21 +160,58 @@ test("scrolling over an unfocused reply editor still triggers waterfall after th
   expect(fixture.appendCount).toBe(1);
 });
 
-test("normal mode navigates when the edge delay expires without requiring another wheel event", () => {
+for (const edge of ["bottom", "top"]) {
+  test(`normal mode waits for another wheel gesture at the ${edge}`, () => {
+    const fixture = createEdgeTriggerSandbox({ appendEnabled: false });
+    const { sandbox, timers } = fixture;
+    sandbox.isAtPageBottom = () => edge === "bottom";
+    sandbox.isAtPageTop = () => edge === "top";
+    const wheel = (pixels = 1) => vm.runInContext(
+      `handleAutoPageWheel({ deltaY: ${edge === "bottom" ? pixels : -pixels}, target: document.body })`, sandbox);
+
+    wheel();
+    const [initialTimer] = timers.keys();
+    wheel();
+    expect(timers.has(initialTimer)).toBe(false);
+    expect(fixture.navigatedUrl).toBe("");
+
+    const [timer] = [...timers.values()];
+    expect(timer.delay).toBe(100);
+    timer.callback();
+    expect(fixture.navigatedUrl).toBe("");
+
+    wheel(2);
+    expect(fixture.navigatedUrl).toBe("");
+    wheel(32);
+    expect(fixture.navigatedUrl).toBe(edge === "bottom" ? "/post-123-2" : "/post-123-1");
+  });
+}
+
+test("a single touch gesture cannot navigate when it reaches the edge", () => {
   const fixture = createEdgeTriggerSandbox({ appendEnabled: false });
   const { sandbox, timers } = fixture;
+  sandbox.isAtPageBottom = () => false;
+  const start = () => vm.runInContext("handleAutoPageTouchStart({ touches: [{ clientY: 100 }], target: document.body })", sandbox);
+  const move = () => vm.runInContext("handleAutoPageTouchMove({ touches: [{ clientY: 50 }], target: document.body })", sandbox);
+  start();
+  sandbox.isAtPageBottom = () => true;
+  move();
+  vm.runInContext("handleAutoPageScroll()", sandbox);
+  expect(timers.size).toBe(0);
+  expect(fixture.navigatedUrl).toBe("");
 
-  vm.runInContext("handleAutoPageWheel({ deltaY: 1, target: document.body })", sandbox);
+  vm.runInContext('handleAutoPageTouchEnd({ type: "touchend", touches: [] })', sandbox);
+  [...timers.values()][0].callback();
+  expect(fixture.navigatedUrl).toBe("");
 
-  const [timer] = [...timers.values()];
-  expect(timer.delay).toBe(100);
-  timer.callback();
+  start();
+  move();
   expect(fixture.navigatedUrl).toBe("/post-123-2");
 });
 
-test("the built-in auto-page delay default is 100ms", () => {
-  expect(configSource).toMatch(/autoPageDelayMs:\s*100/);
-  expect(optionsSource).toMatch(/autoPageDelayMs:\s*100/);
-  expect(optionsHtml).toMatch(/id="autoPageDelayMs"[^>]*value="100"/);
+test("the built-in auto-page delay default is 200ms", () => {
+  expect(configSource).toMatch(/autoPageDelayMs:\s*200/);
+  expect(optionsSource).toMatch(/autoPageDelayMs:\s*200/);
+  expect(optionsHtml).toMatch(/id="autoPageDelayMs"[^>]*value="200"/);
   expect(settingsSource).toContain("const delayDisabled = !autoPageEnabled;");
 });
