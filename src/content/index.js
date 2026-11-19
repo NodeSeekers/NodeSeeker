@@ -1,4 +1,5 @@
 function init() {
+  autoPageLastScrollY = getCurrentAutoPageScrollY();
   initImagePreview();
   handleNotificationJumpTarget();
   document.addEventListener("keydown", handleNewPostShortcut, true);
@@ -225,6 +226,7 @@ function normalizeStoredOptions(options) {
     postSwitcherEnabled: options.postSwitcherEnabled === true,
     autoPageEnabled: options.autoPageEnabled !== false,
     autoPageAppendEnabled: options.autoPageAppendEnabled === true,
+    autoPageFastEnabled: options.autoPageFastEnabled === true,
     autoPageDelayMs: normalizeAutoPageDelayMs(options.autoPageDelayMs),
     postPagePreviousShortcut: normalizeShortcut(
       options.postPagePreviousShortcut,
@@ -360,10 +362,12 @@ function handleStorageChanged(changes, areaName) {
         changes.readingNavigationEnabled
         || changes.autoPageEnabled
         || changes.autoPageAppendEnabled
+        || changes.autoPageFastEnabled
         || changes.autoPageDelayMs
       ) {
         resetAutoPageEdgeArming();
         resetAutoPageAppendState();
+        autoPageLastScrollY = getCurrentAutoPageScrollY();
         autoPageTouchStartY = null;
         autoPageTouchCanGoNext = false;
         autoPageTouchCanGoPrevious = false;

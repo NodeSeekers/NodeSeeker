@@ -3,7 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 
-test("waterfall appends after its delay when the pointer is over an unfocused reply editor", async () => {
+test("waterfall appends on a second gesture over an unfocused reply editor", async () => {
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), "nodeseek-auto-page-"));
   const extension = path.resolve(__dirname, "../..");
   let context;
@@ -20,6 +20,7 @@ test("waterfall appends after its delay when the pointer is over an unfocused re
       readingNavigationEnabled: true,
       autoPageEnabled: true,
       autoPageAppendEnabled: true,
+      autoPageFastEnabled: false,
       autoPageDelayMs: 100,
       autoAttendanceEnabled: false,
       userStatsEnabled: false,
@@ -89,6 +90,12 @@ test("waterfall appends after its delay when the pointer is over an unfocused re
     await page.mouse.wheel(0, 4000);
 
     await expect.poll(() => page.evaluate(() => window.__wheelOverEditor)).toBe(true);
+    await expect.poll(() => page.evaluate(() =>
+      Math.abs(document.scrollingElement.scrollHeight - innerHeight - scrollY)
+    )).toBeLessThanOrEqual(1);
+    await page.waitForTimeout(250);
+    await expect(page.locator("#nsk-body-left .comment-container .content-item")).toHaveCount(1);
+    await page.mouse.wheel(0, 65);
     await expect(page.locator("#nsk-body-left .comment-container .content-item")).toHaveCount(2, { timeout: 5000 });
     await expect(page.locator(".post-top-pager .pager-cur")).toHaveText("2");
     await expect(page.locator(".post-bottom-pager .pager-cur")).toHaveText("2");

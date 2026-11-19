@@ -27,6 +27,7 @@ const PRELOADED_CONFIG_STORAGE_KEYS = Object.freeze([
   "postSwitcherEnabled",
   "autoPageEnabled",
   "autoPageAppendEnabled",
+  "autoPageFastEnabled",
   "autoPageDelayMs",
   "postPagePreviousShortcut",
   "postPageNextShortcut",

@@ -634,11 +634,18 @@
                 <span class="switch-track" aria-hidden="true"></span>
               </span>
             </label>
+            <label class="quick-page-option">
+              <span>快速翻页</span>
+              <span class="switch switch-small">
+                <input id="autoPageFastEnabled" name="autoPageFastEnabled" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+              </span>
+            </label>
             <label id="autoPageDelayOption" class="auto-page-delay-option">
               <span>边缘等待（毫秒）</span>
               <input id="autoPageDelayMs" name="autoPageDelayMs" aria-describedby="autoPageDelayHint" type="number" min="0" step="1" value="200" required>
             </label>
-            <p id="autoPageDelayHint" class="config-description">在页首或页尾停稳至设定时间后，再朝同一方向滚动一小段即可翻页。瀑布流停稳至设定时间后自动追加。</p>
+            <p id="autoPageDelayHint" class="config-description">关闭快速翻页时，滚到边缘停稳后再朝同一方向滚动，才会翻页或追加。开启后，触边立即翻页或追加。</p>
           </section>
 
           <section class="config-group" aria-labelledby="readingShortcutTitle">

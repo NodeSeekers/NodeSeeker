@@ -63,6 +63,7 @@ const DEFAULT_OPTIONS = {
   postSwitcherEnabled: true,
   autoPageEnabled: true,
   autoPageAppendEnabled: true,
+  autoPageFastEnabled: false,
   autoPageDelayMs: 200,
   ...DEFAULT_READING_SHORTCUTS,
   quickPhrasesEnabled: true,
@@ -75,7 +76,6 @@ const DEFAULT_OPTIONS = {
 };
 const MIN_USER_CACHE_HOURS = 12;
 const MIN_AUTO_PAGE_DELAY_MS = 0;
-const AUTO_PAGE_BOTTOM_THRESHOLD = 12;
 const AUTO_PAGE_TOUCH_THRESHOLD = 24;
 const LUCKY_NAV_BUTTON_GAP = 40;
 const ATTENDANCE_REMINDER_STORAGE_KEY = "nshAttendanceReminder";

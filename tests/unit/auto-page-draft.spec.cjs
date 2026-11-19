@@ -22,7 +22,6 @@ function createAutoPageSandbox(editorValue = "", { hasCodeMirror = true, fallbac
     AUTO_PAGE_TOUCH_THRESHOLD: 24,
     performance: { now: () => 1000 },
     autoPageTouchStartY: null,
-    AUTO_PAGE_BOTTOM_THRESHOLD: 120,
     autoPageBottomArmTimer: 0,
     autoPageBottomArmed: true,
     autoPageNavigating: true,
@@ -79,7 +78,7 @@ test("empty CodeMirror fallback ignores line numbers and zero-width filler chara
   expect(vm.runInContext("hasAutoPageReplyDraft()", sandbox)).toBe(false);
 });
 
-function createEdgeTriggerSandbox({ appendEnabled = true, editorFocused = false } = {}) {
+function createEdgeTriggerSandbox({ appendEnabled = true, editorFocused = false, fastEnabled = false } = {}) {
   let timerId = 0;
   const timers = new Map();
   let appendCount = 0;
@@ -115,6 +114,7 @@ function createEdgeTriggerSandbox({ appendEnabled = true, editorFocused = false 
     },
     featureOptions: {
       autoPageAppendEnabled: appendEnabled,
+      autoPageFastEnabled: fastEnabled,
       autoPageDelayMs: 100,
       autoPageEnabled: true,
       readingNavigationEnabled: true
@@ -147,16 +147,27 @@ function createEdgeTriggerSandbox({ appendEnabled = true, editorFocused = false 
   };
 }
 
-test("scrolling over an unfocused reply editor still triggers waterfall after the configured delay", () => {
+test("scrolling over an unfocused reply editor waits for a second gesture in waterfall mode", () => {
   const fixture = createEdgeTriggerSandbox();
   const { sandbox, timers } = fixture;
+  let now = 0;
+  sandbox.performance.now = () => now;
+  const wheel = (pixels, gap) => {
+    now += gap;
+    vm.runInContext(
+      `handleAutoPageWheel({ deltaY: ${pixels}, target: document.querySelectorAll('.CodeMirror')[0] })`, sandbox);
+  };
 
-  vm.runInContext("handleAutoPageWheel({ deltaY: 1, target: document.querySelectorAll('.CodeMirror')[0] })", sandbox);
-
+  for (const pixels of [150, 100, 60, 34]) wheel(pixels, 17);
   expect(fixture.appendCount).toBe(0);
   const [timer] = [...timers.values()];
   expect(timer.delay).toBe(100);
   timer.callback();
+  expect(fixture.appendCount).toBe(0);
+  wheel(26, 250);
+  wheel(14, 20);
+  expect(fixture.appendCount).toBe(0);
+  wheel(60, 250);
   expect(fixture.appendCount).toBe(1);
 });
 
@@ -187,6 +198,27 @@ for (const edge of ["bottom", "top"]) {
   });
 }
 
+test("a delayed decelerating wheel tail cannot turn the page after the edge timer fires", () => {
+  const fixture = createEdgeTriggerSandbox({ appendEnabled: false });
+  const { sandbox, timers } = fixture;
+  let now = 0;
+  sandbox.performance.now = () => now;
+  const wheel = (pixels, gap) => {
+    now += gap;
+    vm.runInContext(`handleAutoPageWheel({ deltaY: ${pixels}, target: document.body })`, sandbox);
+  };
+
+  for (const pixels of [200, 150, 100, 66, 34]) wheel(pixels, 17);
+  [...timers.values()][0].callback();
+  wheel(26, 250);
+  wheel(14, 25);
+  wheel(7, 25);
+  expect(fixture.navigatedUrl).toBe("");
+
+  wheel(60, 250);
+  expect(fixture.navigatedUrl).toBe("/post-123-2");
+});
+
 test("a single touch gesture cannot navigate when it reaches the edge", () => {
   const fixture = createEdgeTriggerSandbox({ appendEnabled: false });
   const { sandbox, timers } = fixture;
@@ -213,5 +245,41 @@ test("the built-in auto-page delay default is 200ms", () => {
   expect(configSource).toMatch(/autoPageDelayMs:\s*200/);
   expect(optionsSource).toMatch(/autoPageDelayMs:\s*200/);
   expect(optionsHtml).toMatch(/id="autoPageDelayMs"[^>]*value="200"/);
-  expect(settingsSource).toContain("const delayDisabled = !autoPageEnabled;");
+  expect(settingsSource).toContain("const delayDisabled = !autoPageEnabled || form.autoPageFastEnabled.checked;");
+});
+
+
+for (const appendEnabled of [false, true]) {
+  test(`fast mode reacts immediately on reaching the bottom, append=${appendEnabled}`, () => {
+    const fixture = createEdgeTriggerSandbox({ appendEnabled, fastEnabled: true });
+    const { sandbox, timers } = fixture;
+    let y = 400;
+    sandbox.getCurrentAutoPageScrollY = () => y;
+    sandbox.isAtPageBottom = () => y === 600;
+    vm.runInContext("handleAutoPageScroll()", sandbox);
+    expect(fixture.navigatedUrl).toBe("");
+    expect(fixture.appendCount).toBe(0);
+
+    y = 600;
+    vm.runInContext("handleAutoPageScroll()", sandbox);
+    expect(fixture.navigatedUrl).toBe(appendEnabled ? "" : "/post-123-2");
+    expect(fixture.appendCount).toBe(appendEnabled ? 1 : 0);
+    expect(timers.size).toBe(0);
+  });
+}
+
+test("fast mode turns to the previous page when scrolling up to the top", () => {
+  const fixture = createEdgeTriggerSandbox({ appendEnabled: false, fastEnabled: true });
+  const { sandbox, timers } = fixture;
+  let y = 400;
+  sandbox.getCurrentAutoPageScrollY = () => y;
+  sandbox.isAtPageTop = () => y === 0;
+  sandbox.isAtPageBottom = () => false;
+  vm.runInContext("handleAutoPageScroll()", sandbox);
+  expect(fixture.navigatedUrl).toBe("");
+
+  y = 0;
+  vm.runInContext("handleAutoPageScroll()", sandbox);
+  expect(fixture.navigatedUrl).toBe("/post-123-1");
+  expect(timers.size).toBe(0);
 });

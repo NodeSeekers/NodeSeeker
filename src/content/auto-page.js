@@ -1,5 +1,8 @@
 const AUTO_PAGE_WHEEL_CONFIRM_PIXELS = 24;
 const AUTO_PAGE_WHEEL_CONFIRM_BURST_MS = 120;
+const AUTO_PAGE_WHEEL_MOMENTUM_GAP_MS = 500;
+let autoPageWheelInput = null;
+let autoPageLastScrollY = 0;
 let autoPageWheelConfirmation = null;
 
 let autoPageTouchCanGoNext = false;
@@ -27,22 +30,44 @@ function handleAutoPageWheel(event) {
 
   const edge = event.deltaY > 0 ? "bottom" : "top";
   disarmAutoPageEdge(edge === "bottom" ? "top" : "bottom");
+  const input = !featureOptions.autoPageFastEnabled && trackAutoPageWheelInput(event, edge);
   const armed = edge === "bottom" ? autoPageBottomArmed : autoPageTopArmed;
   const atEdge = edge === "bottom" ? isAtPageBottom() : isAtPageTop();
-  if (armed && atEdge && !(edge === "bottom" && isAutoPageAppendEnabled())
-      && !confirmAutoPageWheelIntent(event, edge)) return;
+  if (input && armed && atEdge && !confirmAutoPageWheelIntent(input, edge)) return;
   if (edge === "bottom") tryAutoPageNext();
   else tryAutoPagePrevious();
 }
 
-function confirmAutoPageWheelIntent(event, edge) {
+function trackAutoPageWheelInput(event, edge) {
   const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
-  const now = performance.now();
+  const pixels = Math.abs(event.deltaY) * scale;
+  const at = performance.now();
+  const previous = autoPageWheelInput?.edge === edge ? autoPageWheelInput : null;
+  const gap = previous ? at - previous.at : Infinity;
+  const rising = previous && pixels >= previous.pixels + Math.max(8, previous.pixels / 4);
+  let fallingSamples = 0;
+  if (gap <= AUTO_PAGE_WHEEL_CONFIRM_BURST_MS && pixels < previous.pixels) {
+    fallingSamples = (previous.fallingSamples || 0) + 1;
+  }
+
+  // Chromium wheel events carry no momentum phase. A recent decelerating
+  // stream can survive a pause, but a renewed increase is a fresh input.
+  const momentum = fallingSamples >= 2
+    || (gap <= AUTO_PAGE_WHEEL_MOMENTUM_GAP_MS && previous.momentum && !rising);
+  autoPageWheelInput = { edge, at, pixels, fallingSamples, momentum };
+  return autoPageWheelInput;
+}
+
+function confirmAutoPageWheelIntent(input, edge) {
+  if (input.momentum) {
+    autoPageWheelConfirmation = null;
+    return false;
+  }
   const previous = autoPageWheelConfirmation;
-  const carried = previous?.edge === edge && now - previous.at <= AUTO_PAGE_WHEEL_CONFIRM_BURST_MS
+  const carried = previous?.edge === edge && input.at - previous.at <= AUTO_PAGE_WHEEL_CONFIRM_BURST_MS
     ? previous.pixels : 0;
-  const pixels = carried + Math.abs(event.deltaY) * scale;
-  autoPageWheelConfirmation = { edge, at: now, pixels };
+  const pixels = carried + input.pixels;
+  autoPageWheelConfirmation = { edge, at: input.at, pixels };
   return pixels >= AUTO_PAGE_WHEEL_CONFIRM_PIXELS;
 }
 
@@ -78,7 +103,12 @@ function handleAutoPageTouchMove(event) {
   }
 
   autoPageWaitForReplyScroll = false;
-  if (deltaY > 0 && autoPageTouchCanGoNext && !isAutoPageAppendEnabled()) {
+  if (featureOptions.autoPageFastEnabled) {
+    if (deltaY > 0) tryAutoPageNext();
+    else tryAutoPagePrevious();
+    return;
+  }
+  if (deltaY > 0 && autoPageTouchCanGoNext) {
     autoPageBottomArmed = true;
     tryAutoPageNext();
   } else if (deltaY < 0 && autoPageTouchCanGoPrevious) {
@@ -94,17 +124,21 @@ function handleAutoPageTouchEnd(event) {
   autoPageTouchCanGoNext = false;
   autoPageTouchCanGoPrevious = false;
   resetAutoPageEdgeArming();
-  if (wasTracked && event.type !== "touchcancel") handleAutoPageScroll();
+  if (wasTracked && event.type !== "touchcancel" && !featureOptions.autoPageFastEnabled) handleAutoPageScroll();
 }
 
 function handleAutoPageShow(event) {
   autoPageNavigating = false;
+  autoPageLastScrollY = getCurrentAutoPageScrollY();
   autoPageTouchStartY = null;
   resetAutoPageEdgeArming();
   guardAutoPageAfterHistoryRestore(event.persisted);
 }
 
 function handleAutoPageScroll() {
+  const scrollY = getCurrentAutoPageScrollY();
+  const direction = Math.sign(scrollY - autoPageLastScrollY);
+  autoPageLastScrollY = scrollY;
   if (!isAutoPageEnabled() || isReplyEditorActive() || hasAutoPageReplyDraft()) {
     resetAutoPageEdgeArming();
     return;
@@ -119,8 +153,6 @@ function handleAutoPageScroll() {
     autoPageWaitForReplyScroll = false;
   }
 
-  updateAutoPageEdgeArming();
-
   if (autoPageRequiresBottomReset && !isAtPageBottom()) {
     autoPageRequiresBottomReset = false;
   }
@@ -128,6 +160,13 @@ function handleAutoPageScroll() {
   if (autoPageRequiresTopReset && !isAtPageTop()) {
     autoPageRequiresTopReset = false;
   }
+
+  if (featureOptions.autoPageFastEnabled) {
+    if (direction > 0) tryAutoPageNext();
+    else if (direction < 0) tryAutoPagePrevious();
+    return;
+  }
+  updateAutoPageEdgeArming();
 }
 
 function getCurrentAutoPageScrollY() {
@@ -221,7 +260,7 @@ function tryAutoPageNext() {
     return;
   }
 
-  if (!autoPageBottomArmed) {
+  if (!featureOptions.autoPageFastEnabled && !autoPageBottomArmed) {
     scheduleAutoPageEdgeArm("bottom");
     return;
   }
@@ -244,7 +283,7 @@ function tryAutoPagePrevious() {
     return;
   }
 
-  if (!autoPageTopArmed) {
+  if (!featureOptions.autoPageFastEnabled && !autoPageTopArmed) {
     scheduleAutoPageEdgeArm("top");
     return;
   }
@@ -287,7 +326,6 @@ function getPreviousAutoPageUrl(root = document, currentUrl = new URL(location.h
 
 function scheduleAutoPageEdgeArm(edge) {
   if (autoPageTouchStartY != null) return;
-  const append = edge === "bottom" && isAutoPageAppendEnabled();
   const delay = featureOptions.autoPageDelayMs;
   if (edge === "bottom") {
     if (autoPageBottomArmed) {
@@ -298,10 +336,6 @@ function scheduleAutoPageEdgeArm(edge) {
     autoPageBottomArmTimer = window.setTimeout(() => {
       autoPageBottomArmed = isAtPageBottom();
       autoPageBottomArmTimer = 0;
-      if (append && autoPageBottomArmed) {
-        tryAutoPageNext();
-        autoPageBottomArmed = false;
-      }
     }, delay);
     return;
   }
@@ -332,6 +366,7 @@ function disarmAutoPageEdge(edge) {
 }
 
 function resetAutoPageEdgeArming() {
+  autoPageWheelInput = null;
   disarmAutoPageEdge("bottom");
   disarmAutoPageEdge("top");
 }
@@ -689,8 +724,7 @@ function isAtPageBottom() {
     body?.offsetHeight || 0
   );
 
-  const threshold = isAutoPageAppendEnabled() ? AUTO_PAGE_BOTTOM_THRESHOLD : 1;
-  return window.scrollY + window.innerHeight >= scrollHeight - threshold;
+  return window.scrollY + window.innerHeight >= scrollHeight - 1;
 }
 
 function getNextPostPageUrl(root = document, currentUrl = new URL(location.href)) {

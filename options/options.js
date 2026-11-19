@@ -38,6 +38,7 @@ form.luckyAutoAddEnabled.addEventListener("change", saveLuckyAutoAddEnabled);
 form.readingNavigationEnabled.addEventListener("change", syncReadingNavigationControls);
 form.autoPageEnabled.addEventListener("change", syncAutoPageModeControls);
 form.autoPageAppendEnabled.addEventListener("change", syncAutoPageModeControls);
+form.autoPageFastEnabled.addEventListener("change", syncAutoPageModeControls);
 form.quickPhrasesEnabled.addEventListener("change", syncQuickPhraseControls);
 addQuickPhraseButton.addEventListener("click", openQuickPhraseEditor);
 cancelQuickPhraseButton.addEventListener("click", closeQuickPhraseEditor);

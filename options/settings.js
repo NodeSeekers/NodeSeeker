@@ -210,6 +210,7 @@ async function saveOptions(event) {
       postSwitcherEnabled: form.postSwitcherEnabled.checked,
       autoPageEnabled: form.autoPageEnabled.checked,
       autoPageAppendEnabled: form.autoPageAppendEnabled.checked,
+      autoPageFastEnabled: form.autoPageFastEnabled.checked,
       autoPageDelayMs: normalizeAutoPageDelayMs(form.autoPageDelayMs.value),
       postPagePreviousShortcut: normalizeShortcut(form.postPagePreviousShortcut.value),
       postPageNextShortcut: normalizeShortcut(form.postPageNextShortcut.value),
@@ -350,6 +351,7 @@ function setFormValues(options) {
   form.postSwitcherEnabled.checked = options.postSwitcherEnabled;
   form.autoPageEnabled.checked = options.autoPageEnabled;
   form.autoPageAppendEnabled.checked = options.autoPageAppendEnabled;
+  form.autoPageFastEnabled.checked = options.autoPageFastEnabled;
   form.autoPageDelayMs.value = normalizeAutoPageDelayMs(options.autoPageDelayMs);
   syncReadingNavigationControls();
   form.postPagePreviousShortcut.value = formatShortcutForDisplay(options.postPagePreviousShortcut);
@@ -398,6 +400,7 @@ function normalizeStoredOptions(options) {
     postSwitcherEnabled: options.postSwitcherEnabled === true,
     autoPageEnabled: options.autoPageEnabled !== false,
     autoPageAppendEnabled: options.autoPageAppendEnabled === true,
+    autoPageFastEnabled: options.autoPageFastEnabled === true,
     autoPageDelayMs: normalizeAutoPageDelayMs(options.autoPageDelayMs),
     postPagePreviousShortcut: normalizeShortcut(
       options.postPagePreviousShortcut,
@@ -756,9 +759,10 @@ function syncAutoPageModeControls() {
   const readingEnabled = form.readingNavigationEnabled.checked;
   const autoPageEnabled = readingEnabled && form.autoPageEnabled.checked;
   const appendDisabled = !autoPageEnabled;
-  const delayDisabled = !autoPageEnabled;
+  const delayDisabled = !autoPageEnabled || form.autoPageFastEnabled.checked;
 
   setReadingNavigationControlDisabled(form.autoPageAppendEnabled, appendDisabled);
+  setReadingNavigationControlDisabled(form.autoPageFastEnabled, !autoPageEnabled);
   setReadingNavigationControlDisabled(form.autoPageDelayMs, delayDisabled);
   autoPageDelayOption.classList.toggle("disabled", delayDisabled);
 }
