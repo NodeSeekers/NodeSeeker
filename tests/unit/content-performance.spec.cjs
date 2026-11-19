@@ -126,7 +126,7 @@ test("post switcher storage skips unchanged lists and refreshes only after its i
     static now() { return now; }
   }
   const sandbox = vm.createContext({
-    Date: MockDate,
+    Date: MockDate, URL,
     location: { href: "https://www.nodeseek.com/categories/daily" },
     chrome: { storage: { local: { set: async (value) => writes.push(value), remove: async () => {} } } }
   });

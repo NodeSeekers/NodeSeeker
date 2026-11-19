@@ -149,7 +149,15 @@ async function getLatestProfileSnapshot(payload) {
       }
 
       const snapshot = await requestToPromise(profileSnapshots.get(profile.latestSnapshotId));
-      return snapshot ? { profile, snapshot } : null;
+      return {
+        profile,
+        snapshot: snapshot || {
+          id: profile.latestSnapshotId,
+          collectedAt: profile.latestCollectedAt,
+          detailLean: profile.latestDetailLean,
+          textRefs: profile.latestTextRefs
+        }
+      };
     }
   );
 

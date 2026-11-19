@@ -1140,7 +1140,7 @@ function addPendingFollowRuleItems() {
 
   if (termGroups.length === 0 || termGroups.some((terms) => terms.length === 0)) {
     if (keywordInput?.value.trim()) {
-      showToast("关键词格式不正确：别名请用 / 分隔，括号内表示“或”，不同条件用逗号或空格分开。例如 (NoBrand/NB/NNB), 无限", "error");
+      showToast("关键词格式不正确：括号内只能使用 / 分隔符（表示“或”），不同条件用逗号或空格分开。例如 (NoBrand/NB/NNB), 无限", "error");
     }
     keywordInput?.focus();
     return;

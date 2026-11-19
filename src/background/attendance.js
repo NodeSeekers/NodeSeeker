@@ -21,7 +21,8 @@ async function scheduleAutoAttendanceAlarm(runImmediately = false) {
     chrome.alarms.create(AUTO_ATTENDANCE_ALARM_NAME, {
       when: now + AUTO_ATTENDANCE_RETRY_INTERVAL_MS
     });
-    runAutoAttendance().catch(() => {});
+    const run = typeof runBackgroundOperation === "function" ? runBackgroundOperation : (operation) => operation();
+    run(runAutoAttendance).catch(() => {});
     return;
   }
 
@@ -55,6 +56,7 @@ async function runAutoAttendance() {
     return;
   }
 
+  await chrome.alarms.create(AUTO_ATTENDANCE_ALARM_NAME, { when: now + AUTO_ATTENDANCE_RETRY_INTERVAL_MS });
   await chrome.storage.local.set({
     [AUTO_ATTENDANCE_STATE_KEY]: { dateKey, status: "pending", attemptedAt: now }
   });

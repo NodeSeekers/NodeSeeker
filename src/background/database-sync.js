@@ -1,13 +1,6 @@
 const DATA_SYNC_SCHEMA = "nodeseek-helper-data";
 const DATA_SYNC_VERSION = 1;
-const DATA_SYNC_STORE_NAMES = [
-  STORE_PROFILES,
-  STORE_PROFILE_SNAPSHOTS,
-  STORE_PROFILE_TEXT_BLOBS,
-  STORE_LUCKY_NOTIFICATIONS,
-  STORE_VISIT_HISTORY,
-  STORE_META
-];
+const DATA_SYNC_STORE_NAMES = BACKUP_DATABASE_STORE_NAMES;
 const DATA_SYNC_STORE_KEYS = {
   [STORE_PROFILES]: "memberId",
   [STORE_PROFILE_SNAPSHOTS]: "id",
@@ -31,6 +24,7 @@ async function exportDatabaseData() {
     }
   });
 
+  storesData[STORE_META] = storesData[STORE_META].filter((row) => row.key !== FULL_BACKUP_RESTORE_JOURNAL_KEY);
   return {
     schema: DATA_SYNC_SCHEMA,
     version: DATA_SYNC_VERSION,
@@ -44,14 +38,7 @@ async function exportDatabaseData() {
 
 async function importDatabaseData(payload) {
   const normalized = await normalizeDatabaseImportPayload(payload?.data || payload);
-
-  await withTransaction(DATA_SYNC_STORE_NAMES, "readwrite", async (stores) => {
-    for (const storeName of DATA_SYNC_STORE_NAMES) {
-      for (const item of normalized.stores[storeName]) {
-        await requestToPromise(stores[storeName].put(item));
-      }
-    }
-  });
+  await writeNormalizedDatabase(normalized, false);
 
   scheduleLuckyNotificationAlarmSync();
   scheduleProfileRetentionPrune(true);
@@ -64,7 +51,183 @@ async function importDatabaseData(payload) {
   };
 }
 
-async function normalizeDatabaseImportPayload(payload) {
+const FULL_BACKUP_RESTORE_JOURNAL_KEY = "nshFullBackupRestoreJournal";
+let fullBackupRestoreInProgress = false;
+let backupRecoveryAtStartup = null;
+const activeBackgroundOperations = new Set();
+
+function runBackgroundOperation(operation) {
+  if (fullBackupRestoreInProgress) return Promise.reject(new Error("正在恢复备份，请稍后重试"));
+  const task = (backupRecoveryAtStartup || Promise.resolve()).then(() => {
+    if (fullBackupRestoreInProgress) throw new Error("正在恢复备份，请稍后重试");
+    return operation();
+  });
+  activeBackgroundOperations.add(task);
+  return task.finally(() => activeBackgroundOperations.delete(task));
+}
+
+async function recoverInterruptedFullBackup() {
+  const journal = await withTransaction([STORE_META], "readonly", ({ meta }) =>
+    requestToPromise(meta.get(FULL_BACKUP_RESTORE_JOURNAL_KEY)));
+  if (journal) {
+    await replaceLocalStorageState(journal.value, journal.markPreloadedConfigImported !== false);
+    await clearFullBackupRestoreJournal();
+  }
+}
+
+function clearFullBackupRestoreJournal() {
+  return withTransaction([STORE_META], "readwrite", ({ meta }) =>
+    requestToPromise(meta.delete(FULL_BACKUP_RESTORE_JOURNAL_KEY)));
+}
+
+async function restoreBackupConfiguration(configuration) {
+  if (!isImportObject(configuration)) throw new Error("配置备份格式不正确");
+  await backupRecoveryAtStartup;
+  if (fullBackupRestoreInProgress) throw new Error("正在恢复备份，请稍后重试");
+  fullBackupRestoreInProgress = true;
+  try {
+    await Promise.allSettled([...activeBackgroundOperations]);
+    const old = await chrome.storage.local.get({ telegramBotToken: "", telegramTargets: [] });
+    await chrome.storage.local.set(configuration);
+    await chrome.storage.local.remove(["telegramMentionReplyNotificationsEnabled", "telegramChatId"]);
+    if (old.telegramBotToken !== configuration.telegramBotToken
+        || JSON.stringify(old.telegramTargets) !== JSON.stringify(configuration.telegramTargets)) {
+      await chrome.storage.local.remove([
+        ...(old.telegramBotToken !== configuration.telegramBotToken ? ["telegramPersonalStartOffset"] : []),
+        "telegramProcessedTopicUpdateIds",
+        "telegramPendingTopicUpdates", "telegramPendingTopicImageMarkdowns", "telegramPendingTopicReadUserIds",
+        "telegramPendingPersonalStartUpdates", "telegramPendingDirectTopics",
+        "telegramOutgoingMessageEchoes", "telegramOutgoingMessageReadStatuses",
+        "telegramDeliveryReceipts", "telegramActivityCommentReceipts", "telegramRetryStates", "telegramUpdatesRetryState"
+      ]);
+    }
+  } finally {
+    fullBackupRestoreInProgress = false;
+    resumeBackgroundAfterBackupRestore();
+  }
+  return { imported: true };
+}
+
+function resumeBackgroundAfterBackupRestore() {
+  scheduleLuckyNotificationAlarmSync();
+  scheduleProfileRetentionPrune(true);
+  runBackgroundOperation(() => scheduleTelegramMonitorAlarm({ checkImmediately: true })).catch(() => {});
+  runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
+}
+
+async function restoreFullBackup(payload) {
+  if (!isImportObject(payload?.configuration)
+      || !isImportObject(payload?.localState)
+      || !isImportObject(payload?.database)
+      || payload.database.schema !== DATA_SYNC_SCHEMA
+      || !isImportObject(payload.database.stores)) {
+    throw new Error("完整备份文件格式不正确");
+  }
+
+  for (const storeName of DATA_SYNC_STORE_NAMES) {
+    if (!Array.isArray(payload.database.stores[storeName])) {
+      throw new Error(`完整备份缺少资料表：${storeName}`);
+    }
+  }
+  const unknownStores = Object.keys(payload.database.stores)
+    .filter((storeName) => !DATA_SYNC_STORE_NAMES.includes(storeName));
+  if (unknownStores.length > 0) {
+    throw new Error(`当前版本无法恢复资料表：${unknownStores.join("、")}`);
+  }
+
+  const normalized = await normalizeDatabaseImportPayload(payload.database, { allowEmpty: true });
+  if (normalized.skippedCount > 0) {
+    throw new Error(`完整备份中有 ${normalized.skippedCount} 条无法识别的数据；未执行恢复`);
+  }
+
+  const omittedKeys = new Set(BACKUP_OMITTED_LOCAL_KEYS);
+  const nextLocalState = Object.fromEntries(Object.entries({
+    ...payload.localState,
+    ...payload.configuration
+  }).filter(([key]) => !omittedKeys.has(key) && !key.startsWith("nshPostSwitcherSequence:")));
+
+  await backupRecoveryAtStartup;
+  if (fullBackupRestoreInProgress) throw new Error("正在恢复备份，请稍后重试");
+  fullBackupRestoreInProgress = true;
+  let previousDatabase;
+  let previousLocalState;
+  let databaseReplaced = false;
+  let recoveryRequired = false;
+  try {
+    await Promise.allSettled([...activeBackgroundOperations]);
+    previousDatabase = await exportDatabaseData();
+    previousLocalState = await chrome.storage.local.get(null);
+    await writeNormalizedDatabase(normalized, true, nextLocalState);
+    databaseReplaced = true;
+    await replaceLocalStorageState(nextLocalState, true);
+    await clearFullBackupRestoreJournal();
+  } catch (error) {
+    if (databaseReplaced) {
+      try {
+        const previousNormalized = await normalizeDatabaseImportPayload(previousDatabase, { allowEmpty: true });
+        await writeNormalizedDatabase(previousNormalized, true, previousLocalState, false);
+        await replaceLocalStorageState(previousLocalState, false);
+        await clearFullBackupRestoreJournal();
+      } catch (rollbackError) {
+        recoveryRequired = true;
+        throw new Error(`完整恢复失败，自动回滚也失败：${String(rollbackError?.message || rollbackError).slice(0, 180)}`);
+      }
+    }
+    throw error;
+  } finally {
+    fullBackupRestoreInProgress = recoveryRequired;
+    if (!recoveryRequired) resumeBackgroundAfterBackupRestore();
+  }
+
+  return {
+    imported: true,
+    importedCount: normalized.importedCount,
+    skippedCount: 0,
+    counts: normalized.counts
+  };
+}
+
+async function writeNormalizedDatabase(normalized, replace, localState, markPreloadedConfigImported = true) {
+  await withTransaction(DATA_SYNC_STORE_NAMES, "readwrite", async (stores) => {
+    for (const storeName of DATA_SYNC_STORE_NAMES) {
+      if (replace) await requestToPromise(stores[storeName].clear());
+      for (const item of normalized.stores[storeName]) {
+        if (storeName !== STORE_META || item.key !== FULL_BACKUP_RESTORE_JOURNAL_KEY) {
+          await requestToPromise(stores[storeName].put(item));
+        }
+      }
+    }
+    if (localState) await requestToPromise(stores[STORE_META].put({
+      key: FULL_BACKUP_RESTORE_JOURNAL_KEY, value: localState, markPreloadedConfigImported
+    }));
+  });
+}
+
+async function replaceLocalStorageState(values, markPreloadedConfigImported) {
+  const replacement = { ...values };
+  if (markPreloadedConfigImported) {
+    replacement.nshPreloadedConfigImported = true;
+  }
+  delete replacement.nshBackupRestoreInProgress;
+
+  await chrome.storage.local.set({
+    ...replacement,
+    telegramMonitorPaused: true,
+    nshBackupRestoreInProgress: true
+  });
+
+  const current = await chrome.storage.local.get(null);
+  const keysToRemove = Object.keys(current).filter((key) => !Object.hasOwn(replacement, key)
+    && key !== "nshBackupRestoreInProgress" && key !== "telegramMonitorPaused");
+  if (keysToRemove.length > 0) await chrome.storage.local.remove(keysToRemove);
+
+  await chrome.storage.local.set({
+    telegramMonitorPaused: replacement.telegramMonitorPaused === true
+  });
+  await chrome.storage.local.remove("nshBackupRestoreInProgress");
+}
+
+async function normalizeDatabaseImportPayload(payload, { allowEmpty = false } = {}) {
   if (!isImportObject(payload)) {
     throw new Error("数据文件格式不正确");
   }
@@ -100,7 +263,7 @@ async function normalizeDatabaseImportPayload(payload) {
     importedCount += counts[storeName];
   }
 
-  if (importedCount === 0) {
+  if (importedCount === 0 && !allowEmpty) {
     throw new Error("没有可导入的数据");
   }
 

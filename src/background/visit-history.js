@@ -72,20 +72,57 @@ async function listVisitHistory(payload) {
   return withTransaction([STORE_VISIT_HISTORY], "readonly", async ({ visitHistory }) => {
     const index = visitHistory.index("byVisitedAt");
     if (hasVisitHistoryFilters(filters)) {
-      const allItems = await collectCursorValues(index, null, "prev", 0, Number.MAX_SAFE_INTEGER);
-      const matchedItems = allItems.filter((item) => matchesVisitHistoryFilters(item, filters));
-      const total = matchedItems.length;
-      return {
-        items: matchedItems.slice(offset, offset + limit),
-        total,
-        offset,
-        limit
-      };
+      const dateFiltered = filters.postedAtFrom || filters.postedAtTo;
+      const start = filters.postedAtFrom || 1;
+      const end = filters.postedAtTo || Number.MAX_SAFE_INTEGER;
+      if (start > end) return { items: [], total: 0, offset, limit };
+      const source = dateFiltered ? visitHistory.index("byPostedAt") : index;
+      const range = dateFiltered ? IDBKeyRange.bound(start, end) : null;
+      const { items, total } = await collectFilteredVisitHistory(source, range, filters, offset, limit);
+      return { items, total, offset, limit };
     }
 
     const total = await requestToPromise(visitHistory.count());
     const items = await collectCursorValues(index, null, "prev", offset, limit);
     return { items, total, offset, limit };
+  });
+}
+
+function collectFilteredVisitHistory(index, range, filters, offset, limit) {
+  return new Promise((resolve, reject) => {
+    const items = [];
+    let total = 0;
+    const request = index.openCursor(range, "prev");
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve({ items: range ? items.slice(offset, offset + limit) : items, total });
+        return;
+      }
+      if (matchesVisitHistoryFilters(cursor.value, filters)) {
+        if (range) {
+          const item = cursor.value;
+          let low = 0;
+          let high = items.length;
+          while (low < high) {
+            const middle = Math.floor((low + high) / 2);
+            const existing = items[middle];
+            if (existing.visitedAt > item.visitedAt || (existing.visitedAt === item.visitedAt && existing.id > item.id)) {
+              low = middle + 1;
+            } else {
+              high = middle;
+            }
+          }
+          if (low < offset + limit) {
+            items.splice(low, 0, item);
+            if (items.length > offset + limit) items.pop();
+          }
+        } else if (total >= offset && items.length < limit) items.push(cursor.value);
+        total++;
+      }
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
   });
 }
 

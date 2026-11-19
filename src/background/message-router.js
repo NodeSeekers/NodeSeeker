@@ -32,6 +32,14 @@ async function handleMessage(message) {
       return exportDatabaseData();
     case "data:importDatabase":
       return importDatabaseData(payload);
+    case "data:restoreConfig":
+      return restoreBackupConfiguration(payload.configuration);
+    case "data:restoreFullBackup":
+      return restoreFullBackup(payload);
+    case "data:countGroups":
+      return countLocalDataGroups();
+    case "data:clearGroups":
+      return clearLocalDataGroups(payload.groups);
     case "data:clearAll":
       return clearAllLocalData();
     default:

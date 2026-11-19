@@ -97,6 +97,20 @@ const SYNC_CONFIG_DEFAULTS = {
   markdownAltText: "image"
 };
 const SYNC_CONFIG_KEYS = Object.keys(SYNC_CONFIG_DEFAULTS);
+const CONFIG_BACKUP_EXTRA_DEFAULTS = {
+  telegramManagedTopics: [],
+  telegramSettingsTopics: [],
+  telegramSystemNotificationUserId: "",
+  telegramSettingsTopicIconId: "",
+  telegramSettingsTopicIconVersion: 0,
+  telegramTopicUnreadDistortedFaceIconCustomEmojiId: "",
+  telegramNotificationDefaultsMigrationV1: false
+};
+const CONFIG_BACKUP_DEFAULTS = {
+  ...SYNC_CONFIG_DEFAULTS,
+  ...CONFIG_BACKUP_EXTRA_DEFAULTS
+};
+const CONFIG_BACKUP_KEYS = Object.keys(CONFIG_BACKUP_DEFAULTS);
 const MIN_USER_CACHE_HOURS = 12;
 const MIN_AUTO_PAGE_DELAY_MS = 0;
 const LUCKY_PAGE_SIZE = 50;
@@ -129,12 +143,10 @@ const quickPhraseInput = document.querySelector("#quickPhraseInput");
 const addQuickPhraseButton = document.querySelector("#addQuickPhrase");
 const cancelQuickPhraseButton = document.querySelector("#cancelQuickPhrase");
 const confirmQuickPhraseButton = document.querySelector("#confirmQuickPhrase");
-const importConfigButton = document.querySelector("#importConfig");
 const exportConfigButton = document.querySelector("#exportConfig");
-const importDataButton = document.querySelector("#importData");
-const exportDataButton = document.querySelector("#exportData");
-const importConfigFileInput = document.querySelector("#importConfigFile");
-const importDataFileInput = document.querySelector("#importDataFile");
+const exportFullBackupButton = document.querySelector("#exportFullBackup");
+const restoreBackupButton = document.querySelector("#restoreBackup");
+const restoreBackupFileInput = document.querySelector("#restoreBackupFile");
 const extensionVersionNode = document.querySelector("#extensionVersion");
 const profileLabelFieldsNode = document.querySelector("#profileLabelFields");
 const autoPageDelayOption = document.querySelector("#autoPageDelayOption");

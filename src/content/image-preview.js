@@ -9,7 +9,8 @@ function initImagePreview() {
 }
 
 function handleImagePreviewClick(event) {
-  if (!featureOptions.imagePreviewEnabled || event.defaultPrevented || event.button !== 0) return;
+  if (!featureOptions.imagePreviewEnabled || event.defaultPrevented || event.button !== 0
+    || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   const image = toElement(event.target)?.closest?.(".post-content img, .comment-content img");
   if (!image || image.closest(".avatar-wrapper, .user-head, .nsh-profile-user-actions, .nsh-image-preview")) return;
   if (!image.currentSrc && !image.src) return;

@@ -1,4 +1,5 @@
 importScripts(
+  "backup-schema.js",
   "background/constants.js",
   "background/database.js",
   "background/database-sync.js",

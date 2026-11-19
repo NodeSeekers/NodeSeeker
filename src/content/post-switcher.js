@@ -2,6 +2,7 @@ const POST_SWITCHER_STORAGE_KEY = "nshPostSwitcherSequence";
 const POST_SWITCHER_SEQUENCE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const POST_SWITCHER_STORAGE_REFRESH_MS = 60 * 60 * 1000;
 let lastSavedPostSwitcherSequence = null;
+let postSwitcherCleanupStarted = false;
 
 function scanPostSwitcher() {
   scanPostSwitcherAsync().catch(() => {
@@ -47,9 +48,12 @@ async function savePostSwitcherSequence() {
   const previousSequence = lastSavedPostSwitcherSequence;
   lastSavedPostSwitcherSequence = sequence;
   try {
-    await chrome.storage.local.set({
-      [POST_SWITCHER_STORAGE_KEY]: sequence
-    });
+    const key = getPostSwitcherSourceKey(listUrl);
+    await chrome.storage.local.set({ [key]: sequence });
+    if (!postSwitcherCleanupStarted) {
+      postSwitcherCleanupStarted = true;
+      prunePostSwitcherSequences().catch(() => {});
+    }
   } catch {
     if (lastSavedPostSwitcherSequence === sequence) {
       lastSavedPostSwitcherSequence = previousSequence;
@@ -114,17 +118,38 @@ async function renderPostSwitcherButtons(currentPostId) {
 
 async function readPostSwitcherSequence() {
   try {
-    const result = await chrome.storage.local.get(POST_SWITCHER_STORAGE_KEY);
-    const sequence = result?.[POST_SWITCHER_STORAGE_KEY];
+    const referrer = toPostSwitcherUrl(document.referrer);
+    const source = referrer?.origin === location.origin && !getPostSwitcherPostIdFromPath(referrer.pathname)
+      ? referrer.href : sessionStorage.getItem(POST_SWITCHER_STORAGE_KEY);
+    if (!source) return null;
+    const key = getPostSwitcherSourceKey(source);
+    const result = await chrome.storage.local.get(key);
+    const sequence = result?.[key];
     if (!isPostSwitcherSequenceValid(sequence)) {
       await clearPostSwitcherSequence();
       return null;
     }
 
+    sessionStorage.setItem(POST_SWITCHER_STORAGE_KEY, source);
     return sequence;
   } catch {
     return null;
   }
+}
+
+async function prunePostSwitcherSequences() {
+  if (typeof chrome.storage.local.getKeys !== "function") return;
+  const keys = (await chrome.storage.local.getKeys()).filter((key) => key.startsWith(`${POST_SWITCHER_STORAGE_KEY}:`));
+  if (!keys.length) return;
+  const entries = await chrome.storage.local.get(keys);
+  const staleKeys = keys.filter((key) => !isPostSwitcherSequenceValid(entries[key]));
+  if (staleKeys.length) await chrome.storage.local.remove(staleKeys);
+}
+
+function getPostSwitcherSourceKey(url) {
+  const source = new URL(url);
+  source.hash = "";
+  return `${POST_SWITCHER_STORAGE_KEY}:${source.href}`;
 }
 
 function isPostSwitcherSequenceValid(sequence) {
@@ -212,7 +237,7 @@ function removePostSwitcherButton(direction) {
 async function clearPostSwitcherSequence() {
   lastSavedPostSwitcherSequence = null;
   try {
-    await chrome.storage.local.remove(POST_SWITCHER_STORAGE_KEY);
+    sessionStorage.removeItem(POST_SWITCHER_STORAGE_KEY);
   } catch {
     // Ignore storage failures; stale context is non-critical.
   }
@@ -227,6 +252,7 @@ function getPostSwitcherPostIdFromPath(pathname) {
 }
 
 function toPostSwitcherUrl(value) {
+  if (!value) return null;
   try {
     return new URL(value, location.origin);
   } catch {

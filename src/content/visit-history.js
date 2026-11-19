@@ -1,4 +1,5 @@
 let visitHistorySaveKey = "";
+const visitHistorySavesInFlight = new Set();
 let visitHistoryStyleRequestId = 0;
 
 function scanVisitHistory(roots = null) {
@@ -23,11 +24,11 @@ async function saveCurrentVisitHistory() {
   const author = getVisitHistoryAuthor(container);
   const posted = getVisitHistoryPostedAt(container);
   const saveKey = `${postId}:${title}:${author.authorName}:${posted.postedAt}`;
-  if (saveKey === visitHistorySaveKey) {
+  if (saveKey === visitHistorySaveKey || visitHistorySavesInFlight.has(saveKey)) {
     return;
   }
 
-  visitHistorySaveKey = saveKey;
+  visitHistorySavesInFlight.add(saveKey);
   try {
     await sendExtensionMessage("visitHistory:add", {
       post: {
@@ -38,8 +39,11 @@ async function saveCurrentVisitHistory() {
         ...posted
       }
     });
+    visitHistorySaveKey = saveKey;
   } catch (_error) {
     // Visit history should not block page browsing.
+  } finally {
+    visitHistorySavesInFlight.delete(saveKey);
   }
 }
 

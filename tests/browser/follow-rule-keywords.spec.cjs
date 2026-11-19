@@ -84,7 +84,7 @@ test("keyword editors explain invalid syntax and keep paused rules in place", as
     const contentInput = group.locator('[data-follow-rule-item-list="items"]');
     await contentInput.fill("(NoBrand,NB,NNB), 无限");
     await group.locator(".follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
-    await expect(page.getByRole("alert")).toContainText("别名请用 / 分隔");
+    await expect(page.getByRole("alert")).toContainText("括号内只能使用 / 分隔符");
     await expect(contentRules).toHaveCount(3);
     await page.locator('[data-follow-rule-keyword-rule-id="content-alpha"] .telegram-keyword-toggle').click();
     await expect.poll(() => contentRules.evaluateAll((cards) => cards.map((card) => card.dataset.followRuleKeywordRuleId)))
@@ -112,7 +112,7 @@ test("keyword editors explain invalid syntax and keep paused rules in place", as
       .toEqual(["telegram-alpha", "telegram-bravo", "telegram-charlie"]);
     await page.locator("#telegramKeywordInput").fill("(NoBrand,NB,NNB), 无限");
     await page.locator("#addTelegramKeyword").click();
-    await expect(page.getByRole("alert")).toContainText("别名请用 / 分隔");
+    await expect(page.getByRole("alert")).toContainText("括号内只能使用 / 分隔符");
     await expect(telegramRules).toHaveCount(3);
     await page.locator('[data-telegram-rule-id="telegram-alpha"] .telegram-keyword-toggle').click();
     await expect.poll(() => telegramRules.evaluateAll((cards) => cards.map((card) => card.dataset.telegramRuleId)))

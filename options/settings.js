@@ -263,7 +263,7 @@ async function resetOptions() {
       "telegramBoardSlugs",
       "telegramMessageCursors",
       "telegramMentionReplyCursors",
-      "telegramRssSeenIds",
+      "telegramRssSeenIds", "telegramRssPendingPosts", "telegramActivityStatus:at", "telegramActivityStatus:reply",
       "telegramRssInitialized",
       "telegramRssHistory",
       "telegramMonitorPaused",

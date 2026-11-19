@@ -145,13 +145,15 @@ function isPostListItem(item) {
   return item.matches(".post-list-item");
 }
 
+let temporarilyRevealedPostUrl = "";
+
 function setDetailPageBlockState(match) {
   const existingMessage = document.querySelector(".nsh-page-blocked-message");
   document.querySelectorAll(".nsh-detail-content-blocked").forEach((container) => {
     container.classList.remove("nsh-detail-content-blocked");
   });
 
-  if (!match) {
+  if (!match || temporarilyRevealedPostUrl === location.href) {
     existingMessage?.remove();
     return;
   }
@@ -162,6 +164,14 @@ function setDetailPageBlockState(match) {
   message.className = "nsh-page-blocked-message";
   message.setAttribute("role", "status");
   message.textContent = `页面已隐藏，命中屏蔽词“${match.text}”`;
+  const reveal = document.createElement("button");
+  reveal.type = "button";
+  reveal.textContent = "仅查看本帖";
+  reveal.onclick = () => {
+    temporarilyRevealedPostUrl = location.href;
+    setDetailPageBlockState(null);
+  };
+  message.appendChild(reveal);
 
   if (message.parentElement !== container) {
     container.appendChild(message);

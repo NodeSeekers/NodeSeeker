@@ -318,7 +318,13 @@ function ensureAutoPageAppendState() {
   autoPageAppendNextUrl = getNextAutoPageUrl();
 }
 
+let autoPageAppendRequest = null;
+let autoPageAppendItemKeys = null;
+
 function resetAutoPageAppendState() {
+  autoPageAppendRequest?.abort();
+  autoPageAppendRequest = null;
+  autoPageAppendItemKeys = null;
   autoPageAppendLoading = false;
   autoPageAppendInitialized = false;
   autoPageAppendBaseUrl = "";
@@ -338,17 +344,25 @@ function isAutoPageAppendUrlLoaded(pageUrl) {
 function appendNextAutoPage(pageUrl) {
   autoPageAppendLoading = true;
   resetAutoPageEdgeArming();
-  loadAndAppendAutoPage(pageUrl)
+  const request = new AbortController();
+  autoPageAppendRequest = request;
+  const timeout = setTimeout(() => request.abort("timeout"), 20_000);
+  loadAndAppendAutoPage(pageUrl, request.signal)
     .catch((error) => {
-      showAutoPageToast(formatAutoPageAppendError(error), "error");
+      if (request.signal.reason === "timeout") showAutoPageToast("自动翻页请求超时，可以再试一次", "error");
+      else if (!request.signal.aborted) showAutoPageToast(formatAutoPageAppendError(error), "error");
     })
     .finally(() => {
+      clearTimeout(timeout);
+      if (autoPageAppendRequest !== request) return;
+      autoPageAppendRequest = null;
       autoPageAppendLoading = false;
       autoPageTouchStartY = 0;
     });
 }
 
-async function loadAndAppendAutoPage(pageUrl) {
+async function loadAndAppendAutoPage(pageUrl, signal) {
+  const sourceUrl = location.href;
   const targetUrl = toAutoPageUrl(pageUrl);
   if (!targetUrl || !isAutoPageAppendCompatibleUrl(targetUrl)) {
     throw new Error("自动翻页追加目标无效");
@@ -359,6 +373,7 @@ async function loadAndAppendAutoPage(pageUrl) {
   }
 
   const response = await fetch(targetUrl.toString(), {
+    signal,
     credentials: "same-origin",
     headers: {
       Accept: "text/html,application/xhtml+xml"
@@ -373,7 +388,9 @@ async function loadAndAppendAutoPage(pageUrl) {
     throw new Error("自动翻页追加响应地址不匹配");
   }
 
-  const pageDocument = new DOMParser().parseFromString(await response.text(), "text/html");
+  const html = await response.text();
+  if (signal?.aborted || location.href !== sourceUrl || !isAutoPageAppendEnabled()) return;
+  const pageDocument = new DOMParser().parseFromString(html, "text/html");
   appendAutoPageItems(pageDocument, responseUrl);
   if (isPostDetailPath(responseUrl.pathname)) {
     syncAutoPageDetailPagers(pageDocument);
@@ -427,7 +444,7 @@ function appendAutoPageItems(pageDocument, pageUrl) {
     throw new Error("未找到自动翻页追加位置");
   }
 
-  const existingKeys = new Set(
+  const existingKeys = autoPageAppendItemKeys ||= new Set(
     currentItems.map((item) => getAutoPageAppendItemKey(item, currentUrl)).filter(Boolean)
   );
   const sourceItems = getAutoPageAppendItems(pageDocument, pageUrl)

@@ -49,7 +49,8 @@ function getSharedDefaults(platform = "MacIntel") {
   return JSON.parse(vm.runInContext(`JSON.stringify({
     defaultOptions: DEFAULT_OPTIONS,
     telegramDefaults: TELEGRAM_SYNC_CONFIG_DEFAULTS,
-    syncDefaults: SYNC_CONFIG_DEFAULTS
+    syncDefaults: SYNC_CONFIG_DEFAULTS,
+    backupDefaults: CONFIG_BACKUP_DEFAULTS
   })`, sandbox));
 }
 
@@ -114,12 +115,17 @@ test("preloaded importer accepts every first-install setting", () => {
 });
 
 test("configuration export and import preserve the complete defaults schema", async () => {
-  const { defaultOptions, telegramDefaults, syncDefaults } = getSharedDefaults();
+  const { defaultOptions, telegramDefaults, syncDefaults, backupDefaults } = getSharedDefaults();
   const sandbox = vm.createContext({
     DEFAULT_OPTIONS: defaultOptions,
     TELEGRAM_SYNC_CONFIG_DEFAULTS: telegramDefaults,
     SYNC_CONFIG_DEFAULTS: syncDefaults,
     SYNC_CONFIG_KEYS: Object.keys(syncDefaults),
+    CONFIG_BACKUP_EXTRA_DEFAULTS: Object.fromEntries(Object.entries(backupDefaults)
+      .filter(([key]) => !Object.hasOwn(syncDefaults, key))
+      .map(([key, value]) => [key, value])),
+    CONFIG_BACKUP_DEFAULTS: backupDefaults,
+    CONFIG_BACKUP_KEYS: Object.keys(backupDefaults),
     chrome: { storage: { local: { get: async () => ({}) } } },
     extractConfigPayload: (payload) => payload.options,
     normalizeStoredOptions: (options) => options,
@@ -127,13 +133,16 @@ test("configuration export and import preserve the complete defaults schema", as
     isPlainObject: (value) => Boolean(value && typeof value === "object" && !Array.isArray(value))
   });
   vm.runInContext([
-    extractFunction(syncSource, "async function buildConfigImportOptions(payload) {", "async function exportDatabaseData"),
+    extractFunction(syncSource, "async function buildConfigImportOptions(payload) {", "function detectBackupType"),
+    extractFunction(syncSource, "function normalizeConfigBackupOptions(value) {", "function normalizeSyncConfigOptions"),
     extractFunction(syncSource, "function normalizeSyncConfigOptions(value) {", "function pickSyncConfigOptions"),
-    extractFunction(syncSource, "function pickSyncConfigOptions(options) {", "function normalizeSyncString")
+    extractFunction(syncSource, "function pickSyncConfigOptions(options) {", "function pickConfigBackupOptions"),
+    extractFunction(syncSource, "function pickConfigBackupOptions(options) {", "function normalizeSyncString"),
+    extractFunction(syncSource, "function normalizeSyncString(value, fallback) {", "async function readJsonFile")
   ].join("\n"), sandbox);
 
   const exported = JSON.parse(vm.runInContext(
-    `JSON.stringify(pickSyncConfigOptions(normalizeSyncConfigOptions(${JSON.stringify(syncDefaults)})))`,
+    `JSON.stringify(pickConfigBackupOptions(normalizeConfigBackupOptions(${JSON.stringify(backupDefaults)})))`,
     sandbox
   ));
   const imported = JSON.parse(JSON.stringify(await vm.runInContext(
@@ -141,7 +150,7 @@ test("configuration export and import preserve the complete defaults schema", as
     sandbox
   )));
 
-  expect(Object.keys(exported).sort()).toEqual(Object.keys(syncDefaults).sort());
-  expect(exported).toEqual(syncDefaults);
+  expect(Object.keys(exported).sort()).toEqual(Object.keys(backupDefaults).sort());
+  expect(exported.telegramNotificationDefaultsMigrationV1).toBe(true);
   expect(imported).toEqual(exported);
 });

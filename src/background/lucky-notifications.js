@@ -135,7 +135,7 @@ async function saveLuckyResult(id, result) {
 }
 
 function scheduleLuckyNotificationAlarmSync() {
-  syncLuckyNotificationAlarms().catch((error) => {
+  runBackgroundOperation(() => syncLuckyNotificationAlarms()).catch((error) => {
     console.error("Failed to sync lucky notification alarms", error);
   });
 }
@@ -144,7 +144,15 @@ async function handleLuckyAlarm() {
   await syncLuckyNotificationAlarms();
 }
 
-async function syncLuckyNotificationAlarms() {
+let luckyAlarmSyncTail = Promise.resolve();
+
+function syncLuckyNotificationAlarms() {
+  const task = luckyAlarmSyncTail.catch(() => {}).then(syncLuckyNotificationAlarmsOnce);
+  luckyAlarmSyncTail = task;
+  return task;
+}
+
+async function syncLuckyNotificationAlarmsOnce() {
   await clearLegacyLuckyAlarms();
   await chrome.alarms.clear(LUCKY_ALARM_NAME);
 
@@ -153,12 +161,16 @@ async function syncLuckyNotificationAlarms() {
     return;
   }
 
-  await processDueLuckyNotifications();
+  // Keep a wake-up scheduled if notification delivery is interrupted.
+  await chrome.alarms.create(LUCKY_ALARM_NAME, { when: Date.now() + 60_000 });
+  const retryNeeded = await processDueLuckyNotifications();
   const nextNotification = await getNextPendingLuckyNotification();
-  if (nextNotification?.drawAt && nextNotification.drawAt > Date.now()) {
-    await chrome.alarms.create(LUCKY_ALARM_NAME, {
-      when: nextNotification.drawAt
-    });
+  const resultRetryAt = await refreshPendingLuckyResults();
+  const nextAt = Math.min(nextNotification?.drawAt || Infinity, retryNeeded ? Date.now() + 60_000 : Infinity, resultRetryAt);
+  if (Number.isFinite(nextAt)) {
+    await chrome.alarms.create(LUCKY_ALARM_NAME, { when: nextAt });
+  } else {
+    await chrome.alarms.clear(LUCKY_ALARM_NAME);
   }
 }
 
@@ -175,19 +187,60 @@ async function processDueLuckyNotifications() {
   const now = Date.now();
   const dueNotifications = await getDueLuckyNotifications(now);
 
+  let retryNeeded = false;
   for (const notification of dueNotifications) {
-    const result = await resolveLuckyDrawResult(notification);
-    const notificationId = `${LUCKY_NOTIFICATION_PREFIX}${hashString(notification.id)}`;
-    await chrome.notifications.create(notificationId, {
-      type: "basic",
-      iconUrl: chrome.runtime.getURL(LUCKY_NOTIFICATION_ICON),
-      title: "NodeSeek Helper 抽奖通知",
-      message: getLuckyNotificationMessage(notification, result),
-      priority: 2,
-      requireInteraction: true
-    });
-    await markLuckyNotificationNotified(notification.id, notificationId, result);
+    try {
+      const result = await resolveLuckyDrawResult(notification);
+      const notificationId = `${LUCKY_NOTIFICATION_PREFIX}${hashString(notification.id)}`;
+      await chrome.notifications.create(notificationId, {
+        type: "basic",
+        iconUrl: chrome.runtime.getURL(LUCKY_NOTIFICATION_ICON),
+        title: "NodeSeek Helper 抽奖通知",
+        message: getLuckyNotificationMessage(notification, result),
+        priority: 2,
+        requireInteraction: true
+      });
+      await markLuckyNotificationNotified(notification.id, notificationId, result);
+    } catch (error) {
+      retryNeeded = true;
+      console.warn("Failed to deliver lucky notification", error);
+    }
   }
+  return retryNeeded;
+}
+
+async function refreshPendingLuckyResults() {
+  const now = Date.now();
+  const recent = await withTransaction([STORE_LUCKY_NOTIFICATIONS], "readonly", ({ luckyNotifications }) =>
+    collectCursorValues(luckyNotifications.index("byStatusDrawAt"), IDBKeyRange.bound(
+      [LUCKY_STATUS_NOTIFIED, now - 7 * 24 * 60 * 60 * 1000], [LUCKY_STATUS_NOTIFIED, now]
+    ), "prev", 0, Number.MAX_SAFE_INTEGER));
+  let nextAt = Infinity;
+  let remainingChecks = 3;
+  for (const notification of recent) {
+    const attempts = Number(notification.resultRetryAttempts) || 0;
+    if (!shouldResolveLuckyResult(notification) || attempts >= 5) continue;
+    const dueAt = Number(notification.resultRetryAt) || ((notification.notifiedAt || now) + 60_000);
+    if (dueAt > now || remainingChecks === 0) {
+      nextAt = Math.min(nextAt, Math.max(now + 60_000, dueAt));
+      continue;
+    }
+    remainingChecks--;
+    const result = await resolveLuckyDrawResult(notification);
+    if (isLuckyFinalResultStatus(result?.resultStatus)) {
+      await saveLuckyResult(notification.id, result);
+      continue;
+    }
+    const retryAt = Date.now() + 60_000 * 2 ** (attempts + 1);
+    await withTransaction([STORE_LUCKY_NOTIFICATIONS], "readwrite", async ({ luckyNotifications }) => {
+      const current = await requestToPromise(luckyNotifications.get(notification.id));
+      if (shouldResolveLuckyResult(current)) await requestToPromise(luckyNotifications.put({
+        ...current, resultRetryAttempts: attempts + 1, resultRetryAt: retryAt
+      }));
+    });
+    if (attempts + 1 < 5) nextAt = Math.min(nextAt, retryAt);
+  }
+  return nextAt;
 }
 
 async function resolveLuckyDrawResult(notification) {

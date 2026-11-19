@@ -1,13 +1,15 @@
 const TELEGRAM_WORKER_SESSION_KEY = "telegramMonitorWorkerSessionInitialized";
 
-discardLegacyStorage();
-scheduleLuckyNotificationAlarmSync();
-scheduleProfileRetentionPrune();
-scheduleTelegramMonitorAlarmForWorkerStart().catch((error) => {
-  console.warn("Telegram worker startup setup failed:", error?.message || "unknown error");
-  scheduleTelegramMonitorAlarm();
-});
-scheduleAutoAttendanceAlarm();
+backupRecoveryAtStartup = recoverInterruptedFullBackup();
+backupRecoveryAtStartup.then(() => {
+  runBackgroundOperation(discardLegacyStorage).catch(() => {});
+  scheduleLuckyNotificationAlarmSync();
+  scheduleProfileRetentionPrune();
+  runBackgroundOperation(scheduleTelegramMonitorAlarmForWorkerStart).catch((error) => {
+    console.warn("Telegram worker startup setup failed:", error?.message || "unknown error");
+  });
+  runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
+}).catch((error) => console.error("Backup recovery failed:", error?.message || "unknown error"));
 
 async function scheduleTelegramMonitorAlarmForWorkerStart() {
   const sessionStorage = chrome.storage.session;
@@ -36,24 +38,24 @@ function scheduleTelegramMonitorForLifecycle({ checkImmediately = false } = {}) 
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
-  importPreloadedConfiguration()
+  runBackgroundOperation(importPreloadedConfiguration)
     .catch((error) => {
       console.warn("Bundled configuration import failed:", error?.message || "unknown error");
     })
     .finally(() => {
-      discardLegacyStorage();
+      runBackgroundOperation(discardLegacyStorage).catch(() => {});
       scheduleLuckyNotificationAlarmSync();
       scheduleProfileRetentionPrune();
-      scheduleTelegramMonitorAlarm();
-      scheduleAutoAttendanceAlarm();
+      runBackgroundOperation(scheduleTelegramMonitorAlarm).catch(() => {});
+      runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
     });
 });
 chrome.runtime.onStartup.addListener(() => {
-  discardLegacyStorage();
+  runBackgroundOperation(discardLegacyStorage).catch(() => {});
   scheduleLuckyNotificationAlarmSync();
   scheduleProfileRetentionPrune();
-  scheduleTelegramMonitorAlarm();
-  scheduleAutoAttendanceAlarm();
+  runBackgroundOperation(scheduleTelegramMonitorAlarm).catch(() => {});
+  runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
 });
 
 chrome.action.onClicked.addListener(() => {
@@ -62,6 +64,9 @@ chrome.action.onClicked.addListener(() => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") {
+    return;
+  }
+  if (fullBackupRestoreInProgress) {
     return;
   }
 
@@ -74,7 +79,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   if (changes.autoAttendanceEnabled || changes.autoAttendanceMode) {
-    scheduleAutoAttendanceAlarm(Boolean(changes.autoAttendanceEnabled?.newValue));
+    runBackgroundOperation(() => scheduleAutoAttendanceAlarm(Boolean(changes.autoAttendanceEnabled?.newValue))).catch(() => {});
   }
 
   if ([
@@ -121,7 +126,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       "telegramRssMonitorIntervalSeconds",
       "telegramMonitorPaused"
     ].some((key) => changes[key]);
-    chrome.storage.local.get({
+    runBackgroundOperation(() => chrome.storage.local.get({
       telegramBotToken: "",
       telegramTargets: [],
       telegramManagedTopics: [],
@@ -139,7 +144,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       .then(() => Promise.all([
         ...(shouldCheckNodeSeek ? [checkTelegramNotifications()] : []),
         ...(shouldCheckRss ? [checkTelegramRssNotifications()] : [])
-      ]))
+      ])))
       .catch((error) => {
         console.warn("Telegram alarm setup failed:", error?.message || "unknown error");
       });
@@ -148,35 +153,35 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === LUCKY_ALARM_NAME) {
-    handleLuckyAlarm();
+    runBackgroundOperation(handleLuckyAlarm).catch(() => {});
   }
   if (alarm.name === TELEGRAM_MESSAGE_ALARM_NAME) {
-    checkTelegramNotifications().catch((error) => {
+    runBackgroundOperation(checkTelegramNotifications).catch((error) => {
       console.warn("Telegram monitor failed:", error?.message || "unknown error");
     });
   }
   if (TELEGRAM_FAST_MONITOR_ALARM_NAMES.includes(alarm.name)) {
-    checkTelegramNotifications().catch((error) => {
+    runBackgroundOperation(checkTelegramNotifications).catch((error) => {
       console.warn("Telegram monitor failed:", error?.message || "unknown error");
     });
   }
   if (alarm.name === TELEGRAM_RSS_ALARM_NAME) {
-    checkTelegramRssNotifications().catch((error) => {
+    runBackgroundOperation(checkTelegramRssNotifications).catch((error) => {
       console.warn("Telegram RSS monitor failed:", error?.message || "unknown error");
     });
   }
   if (alarm.name === TELEGRAM_UPDATES_WATCHDOG_ALARM_NAME) {
-    ensureTelegramUpdatesLongPoll().catch((error) => {
+    runBackgroundOperation(ensureTelegramUpdatesLongPoll).catch((error) => {
       console.warn("Telegram long-poll recovery failed:", error?.message || "unknown error");
     });
   }
   if (alarm.name === TELEGRAM_PERSONAL_START_ALARM_NAME) {
-    checkTelegramPersonalStartWatch().catch((error) => {
+    runBackgroundOperation(checkTelegramPersonalStartWatch).catch((error) => {
       console.warn("Telegram personal chat setup failed:", error?.message || "unknown error");
     });
   }
   if (alarm.name === AUTO_ATTENDANCE_ALARM_NAME) {
-    runAutoAttendance().catch(() => {});
+    runBackgroundOperation(runAutoAttendance).catch(() => {});
   }
 });
 
@@ -192,7 +197,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "telegram:validateToken") {
-    validateTelegramBotToken(message.payload?.token)
+    runBackgroundOperation(() => validateTelegramBotToken(message.payload?.token))
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) => sendResponse({
         ok: false,
@@ -203,22 +208,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "telegram:test") {
-    sendTelegramTestMessage(message.payload?.targetId || "")
+    runBackgroundOperation(() => sendTelegramTestMessage(message.payload?.targetId || ""))
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }
 
   if (message.type === "telegram:deleteManagedTopics") {
-    deleteTelegramManagedTopics(message.payload?.topicIds)
+    runBackgroundOperation(() => deleteTelegramManagedTopics(message.payload?.topicIds))
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }
 
   if (message.type === "telegram:openBot") {
-    getTelegramBotLink()
-    .then(async (url) => {
+    runBackgroundOperation(async () => {
+      const url = await getTelegramBotLink();
       await startTelegramPersonalStartWatch();
       return chrome.tabs.create({ url });
     })
@@ -228,20 +233,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "telegram:stopPersonalStartWatch") {
-    stopTelegramPersonalStartWatch()
+    runBackgroundOperation(() => stopTelegramPersonalStartWatch())
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }
 
   if (message.type === "telegram:detectDirectTopicId") {
-    getTelegramDirectTopicId(message.payload?.chatId, message.payload?.offset)
+    runBackgroundOperation(() => getTelegramDirectTopicId(message.payload?.chatId, message.payload?.offset))
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }
 
-  handleMessage(message)
+  (["data:restoreFullBackup", "data:restoreConfig"].includes(message.type)
+    ? handleMessage(message)
+    : runBackgroundOperation(() => handleMessage(message)))
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
 

@@ -244,7 +244,10 @@ async function insertQuickPhrase(phrase) {
     return;
   }
 
-  await insertMarkdown(phrase, editor);
+  if (!await insertMarkdown(phrase, editor)) {
+    const status = showEditorStatus("短语未插入，可以复制后手动粘贴", editor);
+    status.appendChild(createCopyButton(phrase));
+  }
 }
 
 async function addQuickPhraseValue(phrase) {

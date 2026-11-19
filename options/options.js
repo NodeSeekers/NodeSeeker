@@ -17,12 +17,10 @@ form.addEventListener("input", handleOptionsFormInput);
 form.addEventListener("change", handleOptionsFormInput);
 resetButton.addEventListener("click", confirmResetOptions);
 clearProfileCacheButton.addEventListener("click", openClearProfileDialog);
-importConfigButton.addEventListener("click", openConfigImportPicker);
 exportConfigButton.addEventListener("click", exportConfig);
-importDataButton.addEventListener("click", openDataImportPicker);
-exportDataButton.addEventListener("click", exportDatabaseData);
-importConfigFileInput.addEventListener("change", importConfigFromFile);
-importDataFileInput.addEventListener("change", importDatabaseDataFromFile);
+exportFullBackupButton.addEventListener("click", exportFullBackup);
+restoreBackupButton.addEventListener("click", openBackupRestorePicker);
+restoreBackupFileInput.addEventListener("change", restoreBackupFromFile);
 toggleApiKeyButton.addEventListener("click", toggleApiKeyVisibility);
 menuButtons.forEach((button) => {
   button.addEventListener("click", () => showPanel(button.dataset.panelTarget));
@@ -132,7 +130,33 @@ function initOptions() {
   renderVisitHistory();
   renderAbout();
   restoreTelegramConfig();
+  updateTelegramDiagnostics().catch(() => {});
   showPanel("label-panel");
+}
+
+const telegramDiagnosticKeys = ["telegramActivityStatus:at", "telegramActivityStatus:reply", "telegramRssLastCheck", "telegramRssLastError"];
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && telegramDiagnosticKeys.some((key) => changes[key])) updateTelegramDiagnostics().catch(() => {});
+});
+
+async function updateTelegramDiagnostics() {
+  const node = document.querySelector("#telegramActivityDiagnostics");
+  const state = await chrome.storage.local.get(telegramDiagnosticKeys);
+  const labels = { checked: "已检查", pending: "有通知待重试", backoff: "退避中，本轮跳过", failed: "检查失败" };
+  const formatTime = (value) => new Date(value).toLocaleTimeString();
+  const rows = telegramDiagnosticKeys.slice(0, 2).flatMap((key, index) => {
+    const entry = state[key];
+    if (!entry?.at) return [];
+    const lastPush = entry.lastDeliveredAt ? ` · 推送 ${formatTime(entry.lastDeliveredAt)}` : "";
+    const lastRequest = entry.status === "backoff" && entry.lastRequestedAt ? ` · 上次请求 ${formatTime(entry.lastRequestedAt)}` : "";
+    const extra = entry.error ? ` · ${entry.error}`
+      : entry.pendingCount ? ` · ${entry.pendingCount} 条待重试` : "";
+    return [`${index ? "回复" : "提及"} ${formatTime(entry.at)} · ${labels[entry.status] || "未知"}${extra}${lastRequest}${lastPush}`];
+  });
+  if (state.telegramRssLastCheck) rows.push(`RSS ${formatTime(state.telegramRssLastCheck)} · ${state.telegramRssLastError || "已检查"}`);
+  node.textContent = rows.join("\n") || "暂无检查记录";
+  node.style.whiteSpace = "pre-line";
 }
 
 async function restoreTelegramConfig() {
@@ -999,7 +1023,7 @@ function addTelegramKeywordRule() {
   }));
   if (additions.length === 0) {
     if (input.value.trim()) {
-      showToast("关键词格式不正确：别名请用 / 分隔，括号内表示“或”，不同条件用逗号或空格分开。例如 (NoBrand/NB/NNB), 无限", "error");
+      showToast("关键词格式不正确：括号内只能使用 / 分隔符（表示“或”），不同条件用逗号或空格分开。例如 (NoBrand/NB/NNB), 无限", "error");
     }
     return;
   }
@@ -1487,7 +1511,7 @@ async function deleteSelectedTelegramManagedTopics() {
   selectedTelegramManagedTopicIds = new Set((result.failed || []).map((topic) => String(topic.id)));
   renderTelegramManagedTopics(getTelegramManagedTopicEntries(stored));
   if (result.failed?.length) {
-    showToast(`已删除 ${result.deleted || 0} 个，${result.failed.length} 个失败：${result.failed.map((topic) => topic.name).join("、")}`, "error");
+    showToast(`已删除 ${result.deleted || 0} 个，${result.failed.length} 个失败：${result.failed.map((topic) => `${topic.name}（${topic.error || "未知错误"}）`).join("、")}`, "error");
   } else {
     selectedTelegramManagedTopicIds.clear();
     renderTelegramManagedTopics(getTelegramManagedTopicEntries(stored));
@@ -1505,7 +1529,7 @@ async function resetTelegramConfig() {
     "telegramSilentPushEnabled",
     "telegramBotToken", "telegramTargets",
     "telegramChatId", "telegramKeywordRules", "telegramBlockedKeywords", "telegramBoardSlugs",
-    "telegramMessageCursors", "telegramSystemNotificationUserId", "telegramRssSeenIds", "telegramRssInitialized", "telegramRssHistory",
+    "telegramMessageCursors", "telegramSystemNotificationUserId", "telegramRssSeenIds", "telegramRssPendingPosts", "telegramActivityStatus:at", "telegramActivityStatus:reply", "telegramRssInitialized", "telegramRssHistory",
     "telegramManagedTopics", "telegramSettingsTopics", "telegramProcessedTopicUpdateIds", "telegramPendingTopicImageMarkdowns",
     "telegramPendingTopicReadUserIds",
     "telegramMentionReplyCursors",

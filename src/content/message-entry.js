@@ -399,9 +399,8 @@ function renderNotificationPreviewEntries(popup, item, entries) {
       }
 
       event.preventDefault();
-      markNotificationPreviewEntryRead(item.key, entry)
-        .catch(() => false)
-        .finally(() => location.assign(link.href));
+      markNotificationPreviewEntryRead(item.key, entry, { navigating: true }).catch(() => {});
+      location.assign(link.href);
     });
     const avatar = createNotificationPreviewAvatar(
       item.key === "message" ? messageParticipant.name : entry.commenter_name,
@@ -474,7 +473,7 @@ function getNotificationMarkReadRequest(key, entry) {
   return null;
 }
 
-async function markNotificationPreviewEntryRead(key, entry) {
+async function markNotificationPreviewEntryRead(key, entry, { navigating = false } = {}) {
   if (!isNotificationPreviewEntryUnread(entry)) return true;
   const request = getNotificationMarkReadRequest(key, entry);
   if (!request) return false;
@@ -487,6 +486,7 @@ async function markNotificationPreviewEntryRead(key, entry) {
         Accept: "application/json",
         "Content-Type": "application/json"
       },
+      keepalive: navigating,
       body: JSON.stringify(request.body)
     });
     const result = await response.json();
@@ -500,7 +500,7 @@ async function markNotificationPreviewEntryRead(key, entry) {
         row.classList.remove("is-unread");
       }
     });
-    await refreshMessageEntryCounts().catch(() => {});
+    if (!navigating) await refreshMessageEntryCounts().catch(() => {});
     return true;
   } catch (_error) {
     return false;

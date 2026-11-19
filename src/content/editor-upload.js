@@ -54,27 +54,40 @@ function handleDrop(event) {
 async function uploadFilesToEditor(imageFiles, editor) {
   const status = showEditorStatus("正在上传图片...", editor);
 
+  const markdownList = [];
+  const failed = [];
   try {
-    const markdownList = [];
 
     for (const file of imageFiles) {
       status.textContent = `正在上传 ${file.name || "图片"}...`;
-      const uploadPayload = await fileToUploadPayload(file);
-      const result = await uploadImage(uploadPayload);
-      markdownList.push(result.markdown);
+      try {
+        const result = await uploadImage(await fileToUploadPayload(file));
+        markdownList.push(result.markdown);
+      } catch (error) {
+        failed.push({ file, error });
+      }
     }
 
     const markdown = `${markdownList.join("\n")}\n`;
-    const inserted = await insertMarkdown(markdown, editor);
+    const inserted = markdownList.length > 0 && await insertMarkdown(markdown, editor);
 
-    status.textContent = inserted ? "图片已上传并插入" : "图片已上传，请手动复制链接";
-    if (!inserted) {
-      status.appendChild(createCopyButton(markdown));
+    status.textContent = inserted ? "图片已上传并插入" : markdownList.length ? "图片已上传，请手动复制链接" : "图片上传失败";
+    if (!inserted && markdownList.length) status.appendChild(createCopyButton(markdown));
+    if (failed.length) {
+      status.append(document.createTextNode(` ${failed.length} 张上传失败：${failed[0].error?.message || failed[0].error} `));
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "重试失败图片";
+      retry.onclick = () => {
+        removeUploadStatus(status);
+        uploadFilesToEditor(failed.map(({ file }) => file), editor);
+      };
+      status.append(retry);
     }
   } catch (error) {
     status.textContent = error.message || String(error);
   } finally {
-    setTimeout(() => removeUploadStatus(status), 6000);
+    if (!failed.length && !status.querySelector("button")) setTimeout(() => removeUploadStatus(status), 6000);
   }
 }
 

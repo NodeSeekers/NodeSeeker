@@ -1119,8 +1119,7 @@ test("a failed first category does not claim the comment or block its counterpar
     sentKinds.push(kind);
   };
 
-  await expect(Promise.resolve(vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox)))
-    .rejects.toThrow("Telegram 暂时失败");
+  expect(await vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox)).toMatchObject({ pendingCount: 1 });
   expect(stored.telegramActivityCommentReceipts).toBeUndefined();
 
   await vm.runInContext('checkForNewNodeSeekActivity({}, "reply")', sandbox);
@@ -1154,8 +1153,7 @@ test("activity extraction failure does not send incomplete alerts or advance the
   sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
   sandbox.sendTelegramActivityNotification = async (...args) => { sent.push(args); };
 
-  await expect(Promise.resolve(vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox)))
-    .rejects.toThrow("帖子页暂时无法读取");
+  expect(await vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox)).toMatchObject({ pendingCount: 1 });
 
   expect(sent).toHaveLength(0);
   expect(stored.telegramMentionReplyCursors.at.ids).toEqual(["11"]);
@@ -2139,4 +2137,75 @@ test("existing unread topic marker updates in place to the eyes icon", async () 
     messageId: "900", markerType: "topic-icon-eyes", markerApplied: true,
     topicIconBeforeMarker: "animal-icon"
   });
+});
+
+test("a missing comment body delays only that notification and survives its removal from the list", async () => {
+  const older = { id: 12, comment_id: 301, post_id: 456, floor_id: 2, commenter_id: 99 };
+  const newer = { id: 13, comment_id: 302, post_id: 456, floor_id: 3, commenter_id: 99 };
+  let feed = [newer, older];
+  let olderAvailable = false;
+  const stored = { telegramMentionReplyCursors: { at: { initialized: true, ids: ["11"] } } };
+  const delivered = [];
+  const sandbox = createSandbox(async () => ({ ok: true, json: async () => ({ success: true, data: feed }) }));
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
+  sandbox.fetchTelegramActivityCommentContents = async (entries) => new Map(entries
+    .filter((entry) => entry.id !== 12 || olderAvailable)
+    .map((entry) => [String(entry.comment_id), { reply: "正文" }]));
+  sandbox.sendTelegramActivityNotification = async (_config, _kind, text) => delivered.push(text);
+  const check = () => vm.runInContext('checkForNewNodeSeekActivity({}, "at")', sandbox);
+  expect(await check()).toMatchObject({ pendingCount: 1 });
+  expect(delivered).toHaveLength(1);
+  expect(delivered[0]).toContain("nshComment=302");
+  expect(stored.telegramMentionReplyCursors.at.pendingEntries.map((entry) => entry.id)).toEqual([12]);
+
+  feed = [newer];
+  olderAvailable = true;
+  stored.telegramRetryStates["nodeseek-activity:at:12"].nextRetryAt = 0;
+  expect(await check()).toMatchObject({ pendingCount: 0 });
+  expect(delivered).toHaveLength(2);
+  expect(delivered[1]).toContain("nshComment=301");
+  expect(stored.telegramMentionReplyCursors.at.pendingEntries).toBeUndefined();
+});
+
+test("concurrent stale-topic sends reuse one replacement and deleting an unrelated topic preserves it", async () => {
+  const stored = {
+    telegramBotToken: "123:fake",
+    telegramManagedTopics: [
+      { id: "reply", kind: "reply", chatId: "333", topicId: "111", name: "回复" },
+      { id: "mention", kind: "mention", chatId: "333", topicId: "222", name: "提及" }
+    ],
+    telegramSettingsTopics: []
+  };
+  let creations = 0;
+  const delivered = [];
+  const sandbox = createSandbox(async (url, options) => {
+    const method = url.split("/").pop();
+    const body = JSON.parse(options.body);
+    if (method === "createForumTopic") {
+      creations++;
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_thread_id: 444 } }) };
+    }
+    if (method === "deleteForumTopic" || body.message_thread_id === 111) {
+      return { ok: false, status: 400, json: async () => ({ ok: false, description: "Bad Request: message thread not found" }) };
+    }
+    delivered.push(body);
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: {} }) };
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => ({ ...defaults, ...Object.fromEntries(Object.keys(defaults).filter((key) => key in stored).map((key) => [key, stored[key]])) }),
+    set: async (values) => Object.assign(stored, values)
+  } } };
+  await vm.runInContext(`Promise.all([
+    sendTelegramMessage("123:fake", { type: "personal", chatId: "333", topicId: "111" }, "one"),
+    sendTelegramMessage("123:fake", { type: "personal", chatId: "333", topicId: "111" }, "two"),
+    deleteTelegramManagedTopics(["mention"])
+  ])`, sandbox);
+
+  expect(creations).toBe(1);
+  expect(delivered.map((item) => item.message_thread_id)).toEqual([444, 444]);
+  expect(stored.telegramManagedTopics.map((topic) => [topic.id, topic.topicId])).toEqual([["reply", "444"]]);
 });
