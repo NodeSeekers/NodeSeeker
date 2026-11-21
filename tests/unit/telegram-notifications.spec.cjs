@@ -769,7 +769,7 @@ test("one failed Telegram Topic reply does not block another topic and remains q
   sandbox.sendNodeSeekPrivateMessage = async (userId, content) => {
     if (userId === "63050" && failFirstPeer) {
       failFirstPeer = false;
-      throw new Error("NodeSeek 暂时不可用");
+      throw Object.assign(new Error("NodeSeek 暂时不可用"), { code: "NODESEEK_DM_NOT_DISPATCHED" });
     }
     sent.push({ userId, content });
   };
@@ -799,6 +799,53 @@ test("one failed Telegram Topic reply does not block another topic and remains q
   ]);
   expect(stored.telegramPendingTopicUpdates).toHaveLength(0);
   expect(stored.telegramProcessedTopicUpdateIds).toContain("100");
+});
+
+test("a NodeSeek send with a lost response is only checked on retry", async () => {
+  const stored = {
+    telegramManagedTopics: [{ kind: "dm", chatId: "333", topicId: "456", nsUserId: "222", name: "Alice" }]
+  };
+  const sandbox = createSandbox();
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => structuredClone({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, structuredClone(values))
+  } } };
+  let sends = 0;
+  let visibleOnNodeSeek = false;
+  sandbox.getNodeSeekTelegramSendBaselineMessageId = async () => "100";
+  sandbox.findNodeSeekOutgoingMessageForTelegramEcho = async () => visibleOnNodeSeek ? { id: 101 } : null;
+  sandbox.sendNodeSeekPrivateMessage = async () => {
+    sends += 1;
+    if (sends === 1) throw new Error("NodeSeek 页面请求超时");
+  };
+  sandbox.scheduleTelegramMonitorAlarm = async () => {};
+  sandbox.markNodeSeekConversationRead = async () => {};
+  const updates = [{
+    update_id: 202,
+    message: { chat: { type: "private", id: "333" }, message_thread_id: 456, from: { id: 1 }, text: "只发一次" }
+  }];
+  const process = (batch) => vm.runInContext(
+    `processTelegramManagedTopicUpdates("token", ${JSON.stringify(batch)})`, sandbox
+  );
+
+  await process(updates);
+  expect(sends).toBe(1);
+  stored.telegramPendingTopicUpdates[0].nextRetryAt = 0;
+  await process(updates);
+  expect(sends).toBe(1);
+  expect(stored.telegramPendingTopicUpdates).toHaveLength(1);
+
+  visibleOnNodeSeek = true;
+  stored.telegramPendingTopicUpdates[0].nextRetryAt = 0;
+  await process(updates);
+  expect(sends).toBe(1);
+  expect(stored.telegramPendingTopicUpdates).toEqual([]);
+  expect(stored.telegramProcessedTopicUpdateIds).toEqual(["202"]);
+
+  stored.telegramMonitorPaused = true;
+  await process([{ ...updates[0], update_id: 203 }]);
+  expect(sends).toBe(1);
+  expect(stored.telegramPendingTopicUpdates).toEqual([expect.objectContaining({ updateIds: ["203"] })]);
 });
 
 test("a stalled HTTP request is aborted and reported as a retryable timeout", async () => {
@@ -2059,12 +2106,14 @@ test("Telegram photo caption and uploaded image Markdown are sent as one NodeSee
     } },
     tabs: {
       query: async () => [{ id: 1, status: "complete" }],
-      sendMessage: async (_tabId, message) => {
-        if (message.payload.operation === "send-private-message") {
-          nodeSeekSends.push(message.payload);
-          return { ok: true, result: { success: true } };
-        }
-        return { ok: true, result: { marked: 0 } };
+      sendMessage: async () => ({ ok: true, result: { marked: 0 } })
+    },
+    scripting: {
+      executeScript: async ({ target, world, args }) => {
+        expect(target).toEqual({ tabId: 1, frameIds: [0] });
+        expect(world).toBe("ISOLATED");
+        nodeSeekSends.push(args[0]);
+        return [{ frameId: 0, result: { ok: true } }];
       }
     }
   };

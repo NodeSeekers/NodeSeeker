@@ -3415,6 +3415,8 @@ async function processTelegramManagedTopicUpdates(token, updates) {
 
   const blockedTopics = new Set();
   for (const queueItem of [...pendingQueue]) {
+    const monitor = await chrome.storage.local.get({ [TELEGRAM_KEYS.paused]: false });
+    if (monitor[TELEGRAM_KEYS.paused] === true) break;
     const pendingUpdates = queueItem.updates.filter((update) => {
       const updateId = String(Number(update?.update_id) || "");
       return updateId && !processedUpdateIds.has(updateId);
@@ -3479,7 +3481,7 @@ async function processTelegramManagedTopicUpdates(token, updates) {
         baselineMessageId = await getNodeSeekTelegramSendBaselineMessageId(nsUserId);
         queueItem.echoId = echoId;
         queueItem.baselineMessageId = baselineMessageId;
-        pendingQueue = pendingQueue.map((item) => item.key === queueItem.key ? queueItem : item);
+        queueItem.sendAttempted = false;
         await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue });
       }
 
@@ -3491,23 +3493,20 @@ async function processTelegramManagedTopicUpdates(token, updates) {
         ...(baselineMessageId != null ? { baselineMessageId } : {})
       });
 
-      let alreadySent = false;
-      if (baselineMessageId != null && String(baselineMessageId).trim()) {
-        const matchingMessage = await findNodeSeekOutgoingMessageForTelegramEcho(
-          nsUserId,
-          content,
-          baselineMessageId
-        );
-        if (matchingMessage) {
-          alreadySent = true;
-          await updateTelegramOutgoingEchoStatus(echoId, "sent");
+      if (queueItem.sendAttempted === false) {
+        queueItem.sendAttempted = true;
+        await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue });
+        try {
+          await sendNodeSeekPrivateMessage(nsUserId, content, imageMarkdowns.length > 0);
+        } catch (error) {
+          if (error?.code === "NODESEEK_DM_NOT_DISPATCHED") queueItem.sendAttempted = false;
+          throw error;
         }
+      } else if (baselineMessageId == null || !String(baselineMessageId).trim()
+          || !await findNodeSeekOutgoingMessageForTelegramEcho(nsUserId, content, baselineMessageId)) {
+        throw new Error("NodeSeek 私信发送结果待核对");
       }
-
-      if (!alreadySent) {
-        await sendNodeSeekPrivateMessage(nsUserId, content, imageMarkdowns.length > 0);
-        await updateTelegramOutgoingEchoStatus(echoId, "sent");
-      }
+      await updateTelegramOutgoingEchoStatus(echoId, "sent");
       runTelegramBackgroundOperation(() => scheduleTelegramMonitorAlarm({ checkImmediately: true })).catch(() => {});
     }
 
@@ -3659,15 +3658,59 @@ async function uploadTelegramMessageImage(tokenValue, image) {
 async function sendNodeSeekPrivateMessage(receiverUid, content, markdown = false) {
   const recipientId = Number(receiverUid);
   if (!Number.isSafeInteger(recipientId) || recipientId <= 0) throw new Error("NodeSeek 用户 ID 无效");
-  await requestNodeSeekTelegramPage("send-private-message", {
-    receiverUid: recipientId,
-    content: String(content),
-    markdown: Boolean(markdown)
-  });
+  let page;
+  try {
+    page = await openNodeSeekTelegramPage();
+  } catch (error) {
+    throw Object.assign(new Error(error?.message || "无法打开 NodeSeek 页面"), {
+      code: "NODESEEK_DM_NOT_DISPATCHED"
+    });
+  }
 
+  try {
+    const monitor = await chrome.storage.local.get({ [TELEGRAM_KEYS.paused]: false });
+    if (monitor[TELEGRAM_KEYS.paused] === true) {
+      throw Object.assign(new Error("Telegram 监控已暂停"), { code: "NODESEEK_DM_NOT_DISPATCHED" });
+    }
+    const [execution] = await chrome.scripting.executeScript({
+      target: { tabId: page.tab.id, frameIds: [0] },
+      world: "ISOLATED",
+      func: postNodeSeekPrivateMessageInPage,
+      args: [{ receiverUid: recipientId, content: String(content), markdown: Boolean(markdown) }]
+    });
+    if (execution?.result?.ok !== true) {
+      const error = new Error(execution?.result?.error || "NodeSeek 私信发送结果待核对");
+      if (execution?.result?.notDispatched === true) error.code = "NODESEEK_DM_NOT_DISPATCHED";
+      throw error;
+    }
+  } finally {
+    if (page.createdTabId) await chrome.tabs.remove(page.createdTabId).catch(() => {});
+  }
 }
 
-async function requestNodeSeekTelegramPage(operation, payload = {}, { forceFreshTab = false } = {}) {
+async function postNodeSeekPrivateMessageInPage(payload) {
+  if (location.origin !== "https://www.nodeseek.com") {
+    return { ok: false, notDispatched: true, error: "NodeSeek 页面已切换" };
+  }
+  try {
+    const response = await fetch("/api/notification/message/send", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000)
+    });
+    const result = await response.json();
+    if (!response.ok || result?.success !== true) {
+      return { ok: false, error: String(result?.message || `NodeSeek 私信发送失败（HTTP ${response.status}）`).slice(0, 300) };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || "NodeSeek 私信发送结果待核对").slice(0, 300) };
+  }
+}
+
+async function openNodeSeekTelegramPage(forceFreshTab = false) {
   const matchingTabs = forceFreshTab
     ? []
     : await chrome.tabs.query({ url: "https://www.nodeseek.com/*" });
@@ -3678,9 +3721,18 @@ async function requestNodeSeekTelegramPage(operation, payload = {}, { forceFresh
   if (!tab) {
     tab = await chrome.tabs.create({ url: "https://www.nodeseek.com/notification", active: false });
     createdTabId = Number(tab.id) || 0;
-    await waitForNodeSeekTelegramTab(tab);
+    try {
+      await waitForNodeSeekTelegramTab(tab);
+    } catch (error) {
+      if (createdTabId) await chrome.tabs.remove(createdTabId).catch(() => {});
+      throw error;
+    }
   }
+  return { tab, createdTabId };
+}
 
+async function requestNodeSeekTelegramPage(operation, payload = {}, { forceFreshTab = false } = {}) {
+  const { tab, createdTabId } = await openNodeSeekTelegramPage(forceFreshTab);
   try {
     let lastError = null;
     for (let attempt = 0; attempt < 12; attempt += 1) {

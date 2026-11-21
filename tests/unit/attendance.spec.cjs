@@ -229,7 +229,7 @@ test("page-context check-in skips the POST when today's record already exists", 
   expect(requests).toEqual([{ url: "/api/attendance/board?page=1", method: "GET" }]);
 });
 
-test("one Telegram reply makes one POST even with repeated page bridge installations", async () => {
+test("legacy Telegram send requests stay out of repeated page bridge installations", async () => {
   const contentSource = fs.readFileSync(path.resolve(__dirname, "../../src/content/auto-attendance.js"), "utf8");
   const pageSource = fs.readFileSync(path.resolve(__dirname, "../../src/main-world/auto-attendance.js"), "utf8");
   const requests = [];
@@ -262,11 +262,8 @@ test("one Telegram reply makes one POST even with repeated page bridge installat
     }, {}, resolve);
   });
 
-  expect(response).toEqual({ ok: true, result: { success: true } });
-  expect(requests).toEqual([{
-    url: "/api/notification/message/send", method: "POST",
-    body: { receiverUid: 222, content: "OK", markdown: false }
-  }]);
+  expect(response).toEqual({ ok: false, error: "NodeSeek 私信发送由扩展后台处理" });
+  expect(requests).toEqual([]);
   expect(publicRequests).toEqual([]);
 });
 

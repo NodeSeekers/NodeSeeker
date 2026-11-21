@@ -1,46 +1,57 @@
 import { chromium } from "@playwright/test";
+import { findTestChromeExtension, openTestChromeBackgroundTab } from "./test-chrome-extension.mjs";
 
 const browser = await chromium.connectOverCDP("http://127.0.0.1:9223", { timeout: 15000 });
-const context = browser.contexts()[0];
-let worker = context.serviceWorkers().find((item) => item.url().startsWith("chrome-extension://"));
-const extensionId = worker ? new URL(worker.url()).host : "fljjlmmflicoocnceopdeeibflcohenp";
-const page = context.pages().find((item) => item.url().startsWith(`chrome-extension://${extensionId}/options/`))
-  || context.pages().find((item) => item.url().startsWith("https://www.nodeseek.com/"))
-  || context.pages()[0];
-const originalUrl = page.url();
+let temporaryPage;
+let worker;
 let passed = false;
-let originalRules = null;
+let originalConfig;
 try {
-  if (!page.url().startsWith(`chrome-extension://${extensionId}/options/`)) {
-    await page.goto(`chrome-extension://${extensionId}/options/options.html`);
-  }
+  const context = browser.contexts()[0];
+  const target = await findTestChromeExtension(browser, context);
+  const extensionOrigin = `chrome-extension://${target.extension.id}`;
+  await target.close();
+  const optionsUrl = `${extensionOrigin}/options/options.html`;
+  const existingPage = context.pages().find((item) => item.url() === optionsUrl);
+  const page = existingPage || (temporaryPage = await openTestChromeBackgroundTab(browser, context, optionsUrl));
+  page.setDefaultTimeout(6000);
+  const findWorker = () => context.serviceWorkers().find((item) => item.url().startsWith(`${extensionOrigin}/`));
+  worker = findWorker();
   if (!worker) {
     await page.evaluate(() => new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "nsh:worker-wake" }, () => resolve(true));
     }));
-    worker = context.serviceWorkers().find((item) => item.url().startsWith("chrome-extension://"));
+    worker = findWorker();
   }
   if (!worker) throw new Error("Extension background worker did not wake");
-  const original = await worker.evaluate(async () => chrome.storage.local.get({ telegramKeywordRules: [], telegramBoardSlugs: [] }));
-  originalRules = original.telegramKeywordRules;
   await page.locator('[data-panel-target="telegram-panel"]').click();
   await page.locator("#telegramConfigGroup").waitFor();
   await page.waitForFunction(() => document.querySelector("#telegramConfigGroup")
     && typeof syncTelegramSetupVisibility === "function");
   const groupParent = await page.locator("#telegramConfigGroup").evaluate((node) => node.parentElement.id);
   if (groupParent !== "telegram-panel") throw new Error("Telegram controls are not inside their top-level panel");
+  try {
+    await page.locator("#telegramTargetDependentSettings").waitFor({ state: "visible", timeout: 5000 });
+  } catch (error) {
+    if (error.name !== "TimeoutError") throw error;
+    throw new Error("The Test Chrome Telegram options probe requires a validated bot and a configured target");
+  }
+  originalConfig = await worker.evaluate(() => chrome.storage.local.get({
+    telegramKeywordRules: [], telegramBoardSlugs: []
+  }));
 
   const boards = page.locator("[data-telegram-board]");
   const boardCount = await boards.count();
   const checkedBefore = await boards.evaluateAll((nodes) => nodes.filter((node) => node.checked).length);
-  if (original.telegramBoardSlugs.length === 0 && checkedBefore !== boardCount) {
+  if (originalConfig.telegramBoardSlugs.length === 0 && checkedBefore !== boardCount) {
     throw new Error("All boards are not selected by default");
   }
   const firstBoard = boards.first();
+  const firstBoardLabel = firstBoard.locator("..");
   const initialChecked = await firstBoard.isChecked();
-  await firstBoard.setChecked(!initialChecked);
+  await firstBoardLabel.click();
   const deselectWorked = await firstBoard.isChecked() === !initialChecked;
-  await firstBoard.setChecked(initialChecked);
+  await firstBoardLabel.click();
 
   const input = page.locator("#telegramKeywordInput");
   const token = `probe-${Date.now()}`;
@@ -48,8 +59,7 @@ try {
   await page.locator("#addTelegramKeyword").click();
   const rule = page.locator(".telegram-keyword-rule").filter({ hasText: token });
   await rule.waitFor();
-  const toggle = rule.locator("[data-telegram-rule-toggle]");
-  await toggle.uncheck();
+  await rule.locator(".telegram-keyword-toggle").click();
   await rule.waitFor({ state: "visible" });
   const disabled = await rule.evaluate((node) => node.classList.contains("is-disabled"));
   await rule.locator("[data-remove-telegram-rule]").click();
@@ -57,15 +67,17 @@ try {
   const persistedRules = await worker.evaluate(async () => chrome.storage.local.get("telegramKeywordRules"));
   passed = deselectWorked && disabled && !persistedRules.telegramKeywordRules?.some((item) => item.terms?.includes(token));
   console.log(JSON.stringify({ label: "telegram-options", panel: groupParent, boardCount, checkedBefore,
-    storedBoardCount: original.telegramBoardSlugs?.length ?? null,
+    storedBoardCount: originalConfig.telegramBoardSlugs?.length ?? null,
     deselectWorked, keywordToggleWorked: disabled, deleteWorked: passed }));
   if (!passed) throw new Error("Telegram option checks failed");
 } finally {
-  if (worker && originalRules) {
-    await worker.evaluate(async (rules) => chrome.storage.local.set({ telegramKeywordRules: rules }), originalRules);
+  try {
+    if (worker && originalConfig) await worker.evaluate((config) => chrome.storage.local.set(config), originalConfig);
+  } finally {
+    try {
+      await temporaryPage?.close();
+    } finally {
+      await browser.close();
+    }
   }
-  if (originalUrl && originalUrl.startsWith("https://www.nodeseek.com/")) {
-    await page.goto(originalUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-  }
-  await browser.close();
 }
