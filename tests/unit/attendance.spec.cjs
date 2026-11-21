@@ -5,7 +5,7 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../src/background/attendance.js"), "utf8");
 
-function createAttendanceSandbox({ enabled = true, mode = "random", sendMessage, now = Date.now(), attendanceState = null } = {}) {
+function createAttendanceSandbox({ enabled = true, mode = "random", sendMessage, now = Date.now(), attendanceState = null, random = () => 0.5 } = {}) {
   const alarms = { created: [], cleared: [] };
   const messages = [];
   class MockDate extends Date {
@@ -40,7 +40,7 @@ function createAttendanceSandbox({ enabled = true, mode = "random", sendMessage,
       onUpdated: { addListener() {}, removeListener() {} }
     }
   };
-  const sandbox = vm.createContext({ chrome, Date: MockDate, Intl, URL, Number, String, Math, setTimeout, clearTimeout });
+  const sandbox = vm.createContext({ chrome, Date: MockDate, Intl, URL, Number, String, Math: Object.assign(Object.create(Math), { random }), setTimeout, clearTimeout });
   vm.runInContext(source, sandbox);
   return { sandbox, storage, alarms, messages };
 }
@@ -70,12 +70,28 @@ test("automatic check-in retries five minutes after a failed attempt", async () 
   expect(alarms.created[0].schedule.when).toBe(now + 3 * 60_000);
 });
 
-test("automatic check-in starts promptly when today has no result", async () => {
-  const now = Date.parse("2026-11-12T16:09:00.000Z");
-  const { sandbox, alarms } = createAttendanceSandbox({ now });
+test("midnight alarm draws one daily time and never signs before it", async () => {
+  const now = Date.parse("2026-11-12T16:00:00.000Z");
+  let draws = 0;
+  const { sandbox, alarms, storage, messages } = createAttendanceSandbox({
+    now, random: () => { draws++; return 0.5; },
+    attendanceState: { dateKey: "2026-11-12", status: "success" }
+  });
 
+  await vm.runInContext("runAutoAttendance()", sandbox);
   await vm.runInContext("scheduleAutoAttendanceAlarm()", sandbox);
+  expect(messages).toHaveLength(0);
+  expect(draws).toBe(1);
+  const planned = storage.nshAutoAttendanceState.scheduledAt;
+  expect(planned).toBeGreaterThan(now);
+  expect(planned).toBeLessThan(now + 60 * 60_000);
+  expect(alarms.created.map((alarm) => alarm.schedule.when)).toEqual([planned, planned]);
+});
 
+test("automatic check-in schedules a catch-up when the daily window has passed", async () => {
+  const now = Date.parse("2026-11-12T17:09:00.000Z");
+  const { sandbox, alarms } = createAttendanceSandbox({ now });
+  await vm.runInContext("scheduleAutoAttendanceAlarm()", sandbox);
   expect(alarms.created[0].schedule.when).toBe(now + 60_000);
 });
 
@@ -83,6 +99,7 @@ test("automatic check-in uses the configured mode and records success once per d
   const { sandbox, storage, messages } = createAttendanceSandbox({
     now: Date.parse("2026-11-13T00:10:00.000Z"),
     mode: "fixed",
+    attendanceState: { dateKey: "2026-11-13", status: "scheduled", scheduledAt: Date.parse("2026-11-12T16:30:00Z") },
   });
 
   await vm.runInContext("runAutoAttendance()", sandbox);
@@ -210,6 +227,47 @@ test("page-context check-in skips the POST when today's record already exists", 
 
   expect(response).toEqual({ ok: true, result: { gain: 4, alreadySigned: true } });
   expect(requests).toEqual([{ url: "/api/attendance/board?page=1", method: "GET" }]);
+});
+
+test("one Telegram reply makes one POST even with repeated page bridge installations", async () => {
+  const contentSource = fs.readFileSync(path.resolve(__dirname, "../../src/content/auto-attendance.js"), "utf8");
+  const pageSource = fs.readFileSync(path.resolve(__dirname, "../../src/main-world/auto-attendance.js"), "utf8");
+  const requests = [];
+  const window = new EventTarget();
+  window.setTimeout = setTimeout;
+  window.clearTimeout = clearTimeout;
+  let messageListener;
+  const sandbox = vm.createContext({
+    chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
+    window,
+    CustomEvent: class extends Event {
+      constructor(type, { detail }) { super(type); this.detail = detail; }
+    },
+    AbortController,
+    AbortSignal,
+    fetch: async (url, options) => {
+      requests.push({ url, method: options.method, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => ({ success: true }) };
+    }
+  });
+  for (let index = 0; index < 7; index += 1) vm.runInContext(pageSource, sandbox);
+  vm.runInContext(contentSource, sandbox);
+  const publicRequests = [];
+  window.addEventListener("nodeseek-helper:telegram-page-request", (event) => publicRequests.push(event.type));
+
+  const response = await new Promise((resolve) => {
+    messageListener({
+      type: "telegram:nodeSeekPageRequest",
+      payload: { operation: "send-private-message", receiverUid: 222, content: "OK", markdown: false }
+    }, {}, resolve);
+  });
+
+  expect(response).toEqual({ ok: true, result: { success: true } });
+  expect(requests).toEqual([{
+    url: "/api/notification/message/send", method: "POST",
+    body: { receiverUid: 222, content: "OK", markdown: false }
+  }]);
+  expect(publicRequests).toEqual([]);
 });
 
 test("followed-post extraction reads the clean title instead of the pagination counter", async () => {

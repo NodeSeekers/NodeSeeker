@@ -1139,6 +1139,10 @@
   outline-offset: 1px;
 }
 
+a.nsh-profile-home-metric.is-activity-trigger {
+  text-decoration: none;
+}
+
 .nsh-profile-home-metric strong {
   color: #24292f;
   font-size: 17px;

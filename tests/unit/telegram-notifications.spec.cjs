@@ -836,14 +836,12 @@ test("Telegram delivery receipts prevent already completed targets from receivin
   } } };
   sandbox.sendTelegramMessage = async () => { sends += 1; };
 
-  await vm.runInContext(`sendTelegramToTargets({
+  const deliver = () => vm.runInContext(`sendTelegramToTargets({
     telegramBotToken: "123456:secret",
     telegramTargets: [{ type: "personal", chatId: "333", enabled: true }]
   }, "same event", "ns-dm:1:2")`, sandbox);
-  await vm.runInContext(`sendTelegramToTargets({
-    telegramBotToken: "123456:secret",
-    telegramTargets: [{ type: "personal", chatId: "333", enabled: true }]
-  }, "same event", "ns-dm:1:2")`, sandbox);
+  await Promise.all([deliver(), deliver()]);
+  await deliver();
 
   expect(sends).toBe(1);
   expect(Object.keys(stored.telegramDeliveryReceipts)).toHaveLength(1);
@@ -1304,20 +1302,25 @@ test("system notification filters skip disabled categories and advance their sha
 
 test("Telegram-originated private reply is not mirrored back to its Telegram topic", async () => {
   const stored = {
-    telegramManagedTopics: [{ id: "dm-1", kind: "dm", chatId: "333", topicId: "456", nsUserId: "222", name: "Alice" }],
+    telegramManagedTopics: [{
+      id: "dm-1", kind: "dm", chatId: "333", topicId: "456", nsUserId: "222", name: "Alice",
+      iconCustomEmojiId: "5312241539987020022", dmAnimalIconVersion: 1
+    }],
     telegramSystemNotificationUserId: "",
     telegramMessageCursors: { "222:777": "1" },
     telegramOutgoingMessageEchoes: []
   };
+  let latestId = 2;
+  const message = { id: 2, sender_id: "777", receiver_id: "222", content: "TG 回信" };
   const telegramSends = [];
   const sandbox = createSandbox(async (url, options = {}) => {
     if (url === "https://www.nodeseek.com/api/notification/message/list") {
-      return { ok: true, json: async () => ({ success: true, msgArray: [{ sender_id: "777", receiver_id: "222", max_id: 2 }] }) };
+      return { ok: true, json: async () => ({ success: true, msgArray: [{ ...message, max_id: latestId }] }) };
     }
     if (url === "https://www.nodeseek.com/api/notification/message/with/222") {
-      return { ok: true, json: async () => ({ success: true, msgArray: [{
-        id: 2, sender_id: "777", receiver_id: "222", content: "TG 回信"
-      }] }) };
+      return { ok: true, json: async () => ({ success: true, msgArray: [
+        { ...message, id: 1 }, message, message
+      ] }) };
     }
     if (url.endsWith("/sendMessage")) {
       telegramSends.push(JSON.parse(options.body));
@@ -1336,16 +1339,24 @@ test("Telegram-originated private reply is not mirrored back to its Telegram top
     createdAt: Date.now()
   });
 
-  await vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify({
-    telegramMessageCursors: stored.telegramMessageCursors,
+  const sync = (cursors = stored.telegramMessageCursors) => vm.runInContext(`checkForNewNodeSeekMessages(${JSON.stringify({
+    telegramMessageCursors: cursors,
     telegramManagedTopics: stored.telegramManagedTopics,
     telegramTargets: [{ type: "personal", chatId: "333", enabled: true }],
     telegramBotToken: "123456:secret"
   })})`, sandbox);
 
+  await sync();
   expect(telegramSends).toHaveLength(0);
   expect(stored.telegramOutgoingMessageEchoes).toHaveLength(0);
   expect(stored.telegramMessageCursors["222:777"]).toBe("2");
+
+  latestId = 1;
+  await sync();
+  expect(stored.telegramMessageCursors["222:777"]).toBe("2");
+  latestId = 2;
+  await sync({ "222:777": "1" });
+  expect(telegramSends).toHaveLength(0);
 });
 
 test("a stale sending echo does not block newer private messages in the conversation", async () => {
@@ -1456,6 +1467,47 @@ test("a recent sending echo remains pending during its delivery grace period", a
 
   expect(result).toEqual({ pending: true });
   expect(stored.telegramOutgoingMessageEchoes).toHaveLength(1);
+});
+
+test("matching a Telegram echo preserves another echo's concurrent status update", async () => {
+  const sandbox = createSandbox();
+  const stored = {
+    telegramOutgoingMessageEchoes: [{
+      id: "first", userId: "222", status: "sent", createdAt: Date.now(),
+      fingerprint: await vm.runInContext('getTelegramOutgoingEchoFingerprint("222", "first")', sandbox)
+    }, {
+      id: "second", userId: "222", status: "sending", createdAt: Date.now(),
+      fingerprint: await vm.runInContext('getTelegramOutgoingEchoFingerprint("222", "second")', sandbox)
+    }]
+  };
+  let signalRead;
+  const matchRead = new Promise((resolve) => { signalRead = resolve; });
+  let resumeRead;
+  const pausedRead = new Promise((resolve) => { resumeRead = resolve; });
+  let firstRead = true;
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => {
+      const values = { ...defaults, ...stored };
+      if (firstRead) {
+        firstRead = false;
+        signalRead();
+        await pausedRead;
+      }
+      return values;
+    },
+    set: async (values) => Object.assign(stored, values)
+  } } };
+
+  const match = vm.runInContext('consumeTelegramOutgoingEcho("222", "first", "2")', sandbox);
+  await matchRead;
+  const update = vm.runInContext('updateTelegramOutgoingEchoStatus("second", "sent")', sandbox);
+  await new Promise(setImmediate);
+  resumeRead();
+  expect(await match).toMatchObject({ record: { id: "first" } });
+  await update;
+  expect(stored.telegramOutgoingMessageEchoes).toEqual([
+    expect.objectContaining({ id: "second", status: "sent" })
+  ]);
 });
 
 test("outgoing system notification reuses its system topic instead of creating a DM topic", async () => {
@@ -1604,7 +1656,7 @@ test("existing managed DM topics get one saved random topic icon without attempt
     userId: "222", userName: "Alice"
   })`, sandbox);
   const repeatedTopic = await vm.runInContext(`getOrCreateManagedTelegramTopic("token", "333", "dm", {
-    userId: "222", userName: "Alice"
+    userId: "222", userName: "  "
   })`, sandbox);
 
   expect(editedTopics).toEqual([{
@@ -1613,8 +1665,15 @@ test("existing managed DM topics get one saved random topic icon without attempt
   expect(topic.iconCustomEmojiId).toBe("5312241539987020022");
   expect(topic.dmAnimalIconVersion).toBe(1);
   expect(repeatedTopic.iconCustomEmojiId).toBe(topic.iconCustomEmojiId);
+  expect(repeatedTopic.name).toBe("Alice");
   expect(randomCount).toBe(1);
   expect(editedTopics).toHaveLength(1);
+
+  const renamedTopic = await vm.runInContext(`getOrCreateManagedTelegramTopic("token", "333", "dm", {
+    userId: "222", userName: "Alice2"
+  })`, sandbox);
+  expect(renamedTopic).toMatchObject({ topicId: "456", name: "Alice2", iconCustomEmojiId: topic.iconCustomEmojiId });
+  expect(editedTopics[1]).toEqual({ chat_id: "333", message_thread_id: 456, name: "Alice2" });
 });
 
 test("private message sync mirrors both directions into one mapped user topic", async () => {
@@ -1635,10 +1694,10 @@ test("private message sync mirrors both directions into one mapped user topic", 
         json: async () => ({
           success: true,
           msgArray: [{
-            sender_id: "777",
-            receiver_id: "222",
-            sender_name: "me",
-            receiver_name: "Anderlille",
+            sender_id: "222",
+            receiver_id: "777",
+            sender_name: "Anderlille",
+            receiver_name: "me",
             max_id: 3
           }]
         })
@@ -1655,7 +1714,6 @@ test("private message sync mirrors both directions into one mapped user topic", 
               sender_id: "777",
               receiver_id: "222",
               sender_name: "me",
-              receiver_name: "Anderlille",
               content: "我主动发出的消息",
               viewed: outgoingViewed
             },
@@ -1663,7 +1721,6 @@ test("private message sync mirrors both directions into one mapped user topic", 
               id: 3,
               sender_id: "222",
               receiver_id: "777",
-              sender_name: "Anderlille",
               receiver_name: "me",
               content: "对方回复的消息"
             }
@@ -1747,6 +1804,7 @@ test("private message sync mirrors both directions into one mapped user topic", 
   expect(stored.telegramMessageCursors["222:777"]).toBe("3");
 
   outgoingViewed = 1;
+  stored.telegramOutgoingMessageReadStatuses["333:456"].topicName = "NodeSeek 用户";
   expect(await vm.runInContext('checkPendingTelegramOutgoingReadStatuses("123456:secret")', sandbox)).toBe(true);
   expect(topicEdits[1]).toEqual({
     chat_id: "333",
@@ -1757,7 +1815,7 @@ test("private message sync mirrors both directions into one mapped user topic", 
   expect(stored.telegramOutgoingMessageReadStatuses).toEqual({});
 });
 
-test("overlapping Telegram monitor checks process a new private message once", async () => {
+test("overlapping 10-second Telegram monitor ticks run one check from the start", async () => {
   const message = {
     sender_id: "222",
     receiver_id: "777",
@@ -1769,6 +1827,7 @@ test("overlapping Telegram monitor checks process a new private message once", a
     telegramTargets: [{ type: "personal", chatId: "333" }],
     telegramMessageNotificationsEnabled: true,
     telegramPostNotificationsEnabled: false,
+    telegramMonitorIntervalSeconds: 10,
     telegramKeywordRules: [],
     telegramBlockedKeywords: [],
     telegramBoardSlugs: [],
@@ -1782,6 +1841,7 @@ test("overlapping Telegram monitor checks process a new private message once", a
   let releaseFetch;
   const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
   let listRequestCount = 0;
+  let monitorConfigReads = 0;
   const sentMessages = [];
   const sandbox = createSandbox(async (url, options = {}) => {
     if (url === "https://www.nodeseek.com/api/notification/message/list") {
@@ -1814,16 +1874,23 @@ test("overlapping Telegram monitor checks process a new private message once", a
     throw new Error(`Unexpected request: ${url}`);
   });
   sandbox.chrome = { storage: { local: {
-    get: async (defaults) => ({ ...defaults, ...stored }),
+    get: async (defaults) => {
+      if (Object.hasOwn(defaults, "telegramMessageCursors") && Object.hasOwn(defaults, "telegramBotToken")) {
+        monitorConfigReads += 1;
+      }
+      return { ...defaults, ...stored };
+    },
     set: async (values) => Object.assign(stored, values)
   } } };
   sandbox.fetchLuckyCurrentUser = async () => ({ member_id: "777" });
 
   const firstCheck = vm.runInContext("checkTelegramNotifications()", sandbox);
   const overlappingCheck = vm.runInContext("checkTelegramNotifications()", sandbox);
+  const thirdCheck = vm.runInContext("checkTelegramNotifications()", sandbox);
   releaseFetch();
-  await Promise.all([firstCheck, overlappingCheck]);
+  await Promise.all([firstCheck, overlappingCheck, thirdCheck]);
 
+  expect(monitorConfigReads).toBe(1);
   expect(listRequestCount).toBe(1);
   expect(sentMessages).toHaveLength(2);
   expect(sentMessages.map((message) => message.text)).toEqual([
@@ -1832,6 +1899,10 @@ test("overlapping Telegram monitor checks process a new private message once", a
   ]);
   expect(sentMessages[0].entities).toEqual([{ type: "code", offset: 0, length: 10 }]);
   expect(stored.telegramMessageCursors["222:777"]).toBe("2");
+
+  await vm.runInContext("checkTelegramNotifications()", sandbox);
+  expect(listRequestCount).toBe(2);
+  expect(sentMessages).toHaveLength(2);
 });
 
 test("Telegram sends only once to duplicate saved destination entries", async () => {

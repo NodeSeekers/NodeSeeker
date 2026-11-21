@@ -180,7 +180,6 @@ test("avatar hover shows cached profile overview without a management-record ent
     await expect(popup.locator(".nsh-profile-home-metric")).toHaveCount(5);
     await expect(popup).toContainText("1,164");
     await expect(popup.locator(".nsh-profile-home-tabs")).toHaveCount(0);
-    await expect(popup.locator("a[href*='/space/123']")).toHaveCount(1);
     await expect(popup.locator(".nsh-profile-user-action-button")).toHaveCount(3);
     await expect(popup.locator(".nsh-profile-message-button")).toHaveAttribute(
       "href",
@@ -189,11 +188,17 @@ test("avatar hover shows cached profile overview without a management-record ent
     const nameLink = popup.locator(".nsh-profile-home-name-link");
     await expect(nameLink).toHaveAttribute("href", "/space/123");
     await expect(nameLink).toHaveAttribute("target", "_blank");
+    const topicMetric = popup.getByRole("link", { name: /主题帖/ });
+    const commentMetric = popup.getByRole("link", { name: /评论数/ });
+    await expect(topicMetric).toHaveAttribute("href", "/space/123#/discussions");
+    await expect(topicMetric).toHaveAttribute("target", "_blank");
+    await expect(commentMetric).toHaveAttribute("href", "/space/123#/comments");
+    await expect(commentMetric).toHaveAttribute("target", "_blank");
 
     await page.locator(".avatar-wrapper a[href='/space/124']").hover();
     await expect(popup).toContainText("第二用户个人介绍");
 
-    await popup.locator(".nsh-profile-home-metric.is-activity-trigger").filter({ hasText: "主题帖" }).hover();
+    await topicMetric.hover();
     const activityPopup = page.locator(".nsh-profile-activity-popup.is-open");
     await expect(activityPopup).toContainText("最近 10 条主题");
     await expect(activityPopup.locator(".nsh-profile-activity-item")).toHaveCount(10);
@@ -215,7 +220,7 @@ test("avatar hover shows cached profile overview without a management-record ent
     await page.mouse.move(1, 1);
     await expect(activityPopup).toHaveCount(0);
     await expect(popup).toBeVisible();
-    await popup.locator(".nsh-profile-home-metric.is-activity-trigger").filter({ hasText: "评论数" }).hover();
+    await commentMetric.hover();
     await expect(activityPopup).toContainText("最近 10 条评论");
     await expect(activityPopup.locator(".nsh-profile-activity-item").first()).toHaveAttribute("href", /post-800-1\?nshFloor=1/);
 

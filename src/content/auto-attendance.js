@@ -14,6 +14,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 function performNodeSeekTelegramPageRequest(payload) {
+  if (payload?.operation === "send-private-message") {
+    return sendNodeSeekTelegramMessage(payload);
+  }
   return new Promise((resolve, reject) => {
     const requestId = `telegram-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const resultEvent = "nodeseek-helper:telegram-page-result";
@@ -34,6 +37,29 @@ function performNodeSeekTelegramPageRequest(payload) {
       detail: { requestId, ...payload }
     }));
   });
+}
+
+async function sendNodeSeekTelegramMessage(payload) {
+  const receiverUid = Number(payload.receiverUid);
+  if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) {
+    throw new Error("NodeSeek 用户 ID 无效");
+  }
+  const response = await fetch("/api/notification/message/send", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      receiverUid,
+      content: String(payload.content || ""),
+      markdown: payload.markdown === true
+    }),
+    signal: AbortSignal.timeout(15_000)
+  });
+  const result = await response.json();
+  if (!response.ok || result?.success !== true) {
+    throw new Error(result?.message || `NodeSeek 私信发送失败（HTTP ${response.status}）`);
+  }
+  return result;
 }
 
 function performAutoAttendanceInPage(payload) {

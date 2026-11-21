@@ -558,11 +558,12 @@ function renderProfileHomePreview(popup, memberId, memberName, profile) {
     { label: "主题帖", value: formatProfileHomeNumber(profile.nPost), activity: "discussions" },
     { label: "评论数", value: formatProfileHomeNumber(profile.nComment), activity: "comments" }
   ].forEach(({ label, value, activity }) => {
-    const metric = document.createElement(activity ? "button" : "div");
+    const metric = document.createElement(activity ? "a" : "div");
     if (activity) {
-      metric.type = "button";
+      metric.href = `/space/${encodeURIComponent(memberId)}#/${activity}`;
+      metric.target = "_blank";
+      metric.rel = "noopener noreferrer";
       metric.classList.add("is-activity-trigger");
-      metric.setAttribute("aria-haspopup", "dialog");
       metric.addEventListener("mouseenter", () => scheduleShowProfileActivityPopup(metric, memberId, activity));
       metric.addEventListener("mouseleave", () => {
         cancelProfileActivityShow(metric);

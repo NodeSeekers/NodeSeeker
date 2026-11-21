@@ -283,3 +283,47 @@ test("fast mode turns to the previous page when scrolling up to the top", () => 
   expect(fixture.navigatedUrl).toBe("/post-123-1");
   expect(timers.size).toBe(0);
 });
+
+
+test("sorted list pager preserves sortBy from the current route when the site omits it", () => {
+  const { sandbox } = createEdgeTriggerSandbox();
+  sandbox.URL = URL;
+  sandbox.location = new URL("https://www.nodeseek.com/?sortBy=postTime");
+  const link = (href, pager) => ({ getAttribute: () => href, matches: () => pager, textContent: "2" });
+  sandbox.links = [
+    link("/categories/daily/page-2", true),
+    link("/page-2?sortBy=lastCommentTime", true),
+    link("/page-2", false),
+    link("/page-2", true)
+  ];
+  expect(vm.runInContext("findPostListPageLink(2, { querySelectorAll: () => links }, location)", sandbox))
+    .toBe("https://www.nodeseek.com/page-2?sortBy=postTime");
+  sandbox.links = [link("/page-3", true)];
+  sandbox.links[0].textContent = "3";
+  expect(vm.runInContext('findPostListPageLink(3, { querySelectorAll: () => links }, new URL("/page-2?sortBy=postTime", location))', sandbox))
+    .toBe("https://www.nodeseek.com/page-3?sortBy=postTime");
+});
+
+
+test("list pagination inherits missing query keys without switching filters, lists or page numbers", () => {
+  const { sandbox } = createEdgeTriggerSandbox();
+  sandbox.URL = URL;
+  sandbox.location = new URL("https://www.nodeseek.com/categories/daily?page=2&sortBy=postTime&filter=x&tag=b&tag=a");
+  const link = (href, pager = true) => ({ getAttribute: () => href, matches: () => pager, textContent: "" });
+  sandbox.links = [
+    link("https://example.com/categories/daily?page=3"),
+    link("/categories/tech?page=3"),
+    link("/categories/daily?page=3&filter=other"),
+    link("/categories/daily?page=3&tag=a&tag=b"),
+    link("/categories/daily?page=3", false)
+  ];
+  const next = () => vm.runInContext("findPostListPageLink(3, { querySelectorAll: () => links }, location)", sandbox);
+  expect(next()).toBe("");
+  sandbox.links.push(link("?page=3&filter=x"));
+  const result = new URL(next());
+  expect(result.pathname).toBe("/categories/daily");
+  expect(result.searchParams.get("page")).toBe("3");
+  expect(result.searchParams.get("sortBy")).toBe("postTime");
+  expect(result.searchParams.get("filter")).toBe("x");
+  expect(result.searchParams.getAll("tag")).toEqual(["b", "a"]);
+});

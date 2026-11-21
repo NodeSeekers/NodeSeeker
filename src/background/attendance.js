@@ -2,8 +2,17 @@ const AUTO_ATTENDANCE_ALARM_NAME = "nshAttendance:auto";
 const AUTO_ATTENDANCE_STATE_KEY = "nshAutoAttendanceState";
 const AUTO_ATTENDANCE_RETRY_INTERVAL_MS = 5 * 60 * 1000;
 const AUTO_ATTENDANCE_FIRST_CHECK_DELAY_MS = 60 * 1000;
+const AUTO_ATTENDANCE_WINDOW_MS = 60 * 60 * 1000;
+let autoAttendanceScheduling = Promise.resolve();
+let autoAttendanceRunning = false;
 
-async function scheduleAutoAttendanceAlarm(runImmediately = false) {
+function scheduleAutoAttendanceAlarm() {
+  const task = autoAttendanceScheduling.catch(() => {}).then(scheduleAutoAttendanceAlarmOnce);
+  autoAttendanceScheduling = task;
+  return task;
+}
+
+async function scheduleAutoAttendanceAlarmOnce() {
   const config = await chrome.storage.local.get({
     autoAttendanceEnabled: false,
     [AUTO_ATTENDANCE_STATE_KEY]: null
@@ -17,15 +26,6 @@ async function scheduleAutoAttendanceAlarm(runImmediately = false) {
   const dateKey = getAutoAttendanceDateKey(now);
   const previous = config[AUTO_ATTENDANCE_STATE_KEY];
   const succeededToday = previous?.dateKey === dateKey && previous.status === "success";
-  if (runImmediately && !succeededToday) {
-    chrome.alarms.create(AUTO_ATTENDANCE_ALARM_NAME, {
-      when: now + AUTO_ATTENDANCE_RETRY_INTERVAL_MS
-    });
-    const run = typeof runBackgroundOperation === "function" ? runBackgroundOperation : (operation) => operation();
-    run(runAutoAttendance).catch(() => {});
-    return;
-  }
-
   let nextAttemptAt;
   if (succeededToday) {
     nextAttemptAt = getNextAutoAttendanceMidnightTimestamp(now);
@@ -34,12 +34,33 @@ async function scheduleAutoAttendanceAlarm(runImmediately = false) {
     const attemptedAt = Number(previous.attemptedAt) || 0;
     nextAttemptAt = Math.max(now + 30_000, attemptedAt + AUTO_ATTENDANCE_RETRY_INTERVAL_MS);
   } else {
-    nextAttemptAt = now + AUTO_ATTENDANCE_FIRST_CHECK_DELAY_MS;
+    const midnight = getNextAutoAttendanceMidnightTimestamp(now) - 24 * AUTO_ATTENDANCE_WINDOW_MS;
+    const windowEnd = midnight + AUTO_ATTENDANCE_WINDOW_MS;
+    let scheduledAt = previous?.dateKey === dateKey && previous.status === "scheduled"
+      ? Number(previous.scheduledAt) : 0;
+    if (!(scheduledAt >= midnight && scheduledAt < windowEnd)) {
+      scheduledAt = midnight + 1000 + Math.floor(Math.random() * (AUTO_ATTENDANCE_WINDOW_MS - 1000));
+      await chrome.storage.local.set({ [AUTO_ATTENDANCE_STATE_KEY]: { dateKey, status: "scheduled", scheduledAt } });
+    }
+    const catchUpAt = now + AUTO_ATTENDANCE_FIRST_CHECK_DELAY_MS;
+    nextAttemptAt = scheduledAt > now ? scheduledAt
+      : now < windowEnd ? Math.min(catchUpAt, Math.max(now + 1, windowEnd - 1)) : catchUpAt;
   }
-  chrome.alarms.create(AUTO_ATTENDANCE_ALARM_NAME, { when: nextAttemptAt });
+  await chrome.alarms.create(AUTO_ATTENDANCE_ALARM_NAME, { when: nextAttemptAt });
 }
 
 async function runAutoAttendance() {
+  if (autoAttendanceRunning) return;
+  autoAttendanceRunning = true;
+  try {
+    await autoAttendanceScheduling.catch(() => {});
+    await runScheduledAutoAttendance();
+  } finally {
+    autoAttendanceRunning = false;
+  }
+}
+
+async function runScheduledAutoAttendance() {
   const config = await chrome.storage.local.get({
     autoAttendanceEnabled: false,
     autoAttendanceMode: "random",
@@ -47,11 +68,17 @@ async function runAutoAttendance() {
   });
   if (!config.autoAttendanceEnabled) return;
 
-  const dateKey = getAutoAttendanceDateKey(Date.now());
   const now = Date.now();
+  const dateKey = getAutoAttendanceDateKey(now);
   const previous = config[AUTO_ATTENDANCE_STATE_KEY];
+  if (previous?.dateKey !== dateKey
+      || (previous.status === "scheduled" && Number(previous.scheduledAt) > now)) {
+    await scheduleAutoAttendanceAlarm();
+    return;
+  }
   if (previous?.dateKey === dateKey
-      && (previous.status === "success" || now - Number(previous.attemptedAt || 0) < AUTO_ATTENDANCE_RETRY_INTERVAL_MS)) {
+      && (previous.status === "success" || ((previous.status === "failed" || previous.status === "pending")
+        && now - Number(previous.attemptedAt || 0) < AUTO_ATTENDANCE_RETRY_INTERVAL_MS))) {
     await scheduleAutoAttendanceAlarm();
     return;
   }

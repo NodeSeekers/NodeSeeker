@@ -472,7 +472,7 @@ async function loadAndAppendAutoPage(pageUrl, signal) {
   if (isPostDetailPath(responseUrl.pathname)) {
     syncAutoPageDetailPagers(pageDocument);
   } else {
-    syncAutoPageListPagers(pageDocument);
+    syncAutoPageListPagers(pageDocument, responseUrl);
   }
   autoPageAppendLoadedUrls.add(normalizeAutoPageUrl(responseUrl.toString()));
   setAutoPageAppendNextUrl(getNextAutoPageUrl(pageDocument, responseUrl));
@@ -495,7 +495,7 @@ function syncAutoPageDetailPagers(pageDocument) {
   });
 }
 
-function syncAutoPageListPagers(pageDocument) {
+function syncAutoPageListPagers(pageDocument, pageUrl) {
   const currentPagers = Array.from(document.querySelectorAll(".nsk-pager"));
   const sourcePagers = Array.from(pageDocument.querySelectorAll(".nsk-pager"));
 
@@ -504,6 +504,10 @@ function syncAutoPageListPagers(pageDocument) {
     if (!sourcePager) return;
 
     const nextPager = document.importNode(sourcePager, true);
+    for (const link of nextPager.querySelectorAll("a[href]")) {
+      const target = getPostListPagerUrl(link, pageUrl);
+      if (target && getPostListRouteKey(target) === getPostListRouteKey(pageUrl)) link.href = target.href;
+    }
     const currentPage = nextPager.querySelector(".pager-pos.pager-cur");
     nextPager.querySelectorAll(".pager-pos[aria-current]").forEach((pageLink) => {
       if (pageLink !== currentPage) pageLink.removeAttribute("aria-current");
@@ -789,12 +793,30 @@ function getPostListPageUrl(step, root = document, currentUrl = new URL(location
 
 function findPostListPageLink(targetPage, root = document, currentUrl = new URL(location.href)) {
   const currentRouteKey = getPostListRouteKey(currentUrl);
-  const link = Array.from(root.querySelectorAll("a[href]")).find((candidate) => {
-    const url = toAutoPageUrl(candidate.getAttribute("href"), currentUrl);
-    return isPostListPageLink(candidate, url, targetPage, currentRouteKey);
-  });
+  for (const link of root.querySelectorAll("a[href]")) {
+    const url = getPostListPagerUrl(link, currentUrl);
+    if (isPostListPageLink(link, url, targetPage, currentRouteKey)) return url.href;
+  }
+  return "";
+}
 
-  return link ? toAutoPageAbsoluteUrl(link.getAttribute("href"), currentUrl) : "";
+function getPostListPagerUrl(link, currentUrl) {
+  const url = toAutoPageUrl(link.getAttribute("href"), currentUrl);
+  if (!url || url.origin !== currentUrl.origin || isPostDetailPath(url.pathname)
+      || !link.matches(".nsk-pager a[href], .pager-pos, .pager-next, .pager-prev")) return url;
+
+  const listPath = (candidate) => normalizePostListPathname(
+    getPostListPathPage(candidate.pathname)?.pathname || candidate.pathname
+  );
+  if (listPath(url) !== listPath(currentUrl)) return url;
+
+  // A list pager may omit the active query options. Copy missing keys only,
+  // keeping both the linked page number and any explicit values in the link.
+  for (const key of new Set(currentUrl.searchParams.keys())) {
+    if (key === "page" || url.searchParams.has(key)) continue;
+    for (const value of currentUrl.searchParams.getAll(key)) url.searchParams.append(key, value);
+  }
+  return url;
 }
 
 function isPostListPageLink(link, url, targetPage, currentRouteKey) {
@@ -866,9 +888,7 @@ function normalizePostListPathname(pathname) {
 
 function getSortedSearchParams(searchParams) {
   return Array.from(searchParams.entries())
-    .sort(([firstKey, firstValue], [secondKey, secondValue]) => {
-      return firstKey.localeCompare(secondKey) || firstValue.localeCompare(secondValue);
-    })
+    .sort(([firstKey], [secondKey]) => firstKey.localeCompare(secondKey))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join("&");
 }

@@ -50,28 +50,6 @@
   }
 
   async function performTelegramPageRequest(detail) {
-    if (detail.operation === "send-private-message") {
-      const receiverUid = Number(detail.receiverUid);
-      if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) {
-        throw new Error("NodeSeek 用户 ID 无效");
-      }
-      const response = await fetchWithTimeout("/api/notification/message/send", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          receiverUid,
-          content: String(detail.content || ""),
-          markdown: detail.markdown === true
-        })
-      });
-      const result = await response.json();
-      if (!response.ok || result?.success !== true) {
-        throw new Error(result?.message || `NodeSeek 私信发送失败（HTTP ${response.status}）`);
-      }
-      return result;
-    }
-
     if (detail.operation === "mark-conversation-read") {
       const userId = String(detail.userId || "").trim();
       const currentUserId = String(detail.currentUserId || "").trim();

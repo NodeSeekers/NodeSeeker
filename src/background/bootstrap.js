@@ -81,7 +81,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   if (changes.autoAttendanceEnabled || changes.autoAttendanceMode) {
-    runBackgroundOperation(() => scheduleAutoAttendanceAlarm(Boolean(changes.autoAttendanceEnabled?.newValue))).catch(() => {});
+    runBackgroundOperation(scheduleAutoAttendanceAlarm).catch(() => {});
   }
 
   if ([
