@@ -5,9 +5,9 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../src/background/attendance.js"), "utf8");
 
-function createAttendanceSandbox({ enabled = true, mode = "random", sendMessage, now = Date.now(), attendanceState = null, random = () => 0.5 } = {}) {
+function createAttendanceSandbox({ enabled = true, mode = "random", fetchImpl, now = Date.now(), attendanceState = null, random = () => 0.5 } = {}) {
   const alarms = { created: [], cleared: [] };
-  const messages = [];
+  const requests = [];
   class MockDate extends Date {
     constructor(...args) { super(...(args.length ? args : [now])); }
     static now() { return now; }
@@ -28,21 +28,29 @@ function createAttendanceSandbox({ enabled = true, mode = "random", sendMessage,
     alarms: {
       clear: async (name) => { alarms.cleared.push(name); return true; },
       create: (name, schedule) => alarms.created.push({ name, schedule })
-    },
-    tabs: {
-      query: async () => [{ id: 1, url: "https://www.nodeseek.com/" }],
-      create: async () => ({ id: 2, status: "complete" }),
-      sendMessage: async (tabId, message) => {
-        messages.push({ tabId, message });
-        return sendMessage ? sendMessage(tabId, message) : { ok: true, result: { gain: 5 } };
-      },
-      remove: async () => {},
-      onUpdated: { addListener() {}, removeListener() {} }
     }
   };
-  const sandbox = vm.createContext({ chrome, Date: MockDate, Intl, URL, Number, String, Math: Object.assign(Object.create(Math), { random }), setTimeout, clearTimeout });
+  const sandbox = vm.createContext({
+    chrome,
+    fetch: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (fetchImpl) return fetchImpl(url, options);
+      return options.method === "POST"
+        ? { ok: true, json: async () => ({ success: true, gain: 5 }) }
+        : { ok: true, json: async () => ({ record: null }) };
+    },
+    AbortSignal,
+    Date: MockDate,
+    Intl,
+    URL,
+    Number,
+    String,
+    Math: Object.assign(Object.create(Math), { random }),
+    setTimeout,
+    clearTimeout
+  });
   vm.runInContext(source, sandbox);
-  return { sandbox, storage, alarms, messages };
+  return { sandbox, storage, alarms, requests };
 }
 
 test("automatic check-in schedules for the next UTC+8 midnight after today's success", async () => {
@@ -73,14 +81,14 @@ test("automatic check-in retries five minutes after a failed attempt", async () 
 test("midnight alarm draws one daily time and never signs before it", async () => {
   const now = Date.parse("2026-11-12T16:00:00.000Z");
   let draws = 0;
-  const { sandbox, alarms, storage, messages } = createAttendanceSandbox({
+  const { sandbox, alarms, storage, requests } = createAttendanceSandbox({
     now, random: () => { draws++; return 0.5; },
     attendanceState: { dateKey: "2026-11-12", status: "success" }
   });
 
   await vm.runInContext("runAutoAttendance()", sandbox);
   await vm.runInContext("scheduleAutoAttendanceAlarm()", sandbox);
-  expect(messages).toHaveLength(0);
+  expect(requests).toHaveLength(0);
   expect(draws).toBe(1);
   const planned = storage.nshAutoAttendanceState.scheduledAt;
   expect(planned).toBeGreaterThan(now);
@@ -96,7 +104,7 @@ test("automatic check-in schedules a catch-up when the daily window has passed",
 });
 
 test("automatic check-in uses the configured mode and records success once per day", async () => {
-  const { sandbox, storage, messages } = createAttendanceSandbox({
+  const { sandbox, storage, requests } = createAttendanceSandbox({
     now: Date.parse("2026-11-13T00:10:00.000Z"),
     mode: "fixed",
     attendanceState: { dateKey: "2026-11-13", status: "scheduled", scheduledAt: Date.parse("2026-11-12T16:30:00Z") },
@@ -105,10 +113,11 @@ test("automatic check-in uses the configured mode and records success once per d
   await vm.runInContext("runAutoAttendance()", sandbox);
   await vm.runInContext("runAutoAttendance()", sandbox);
 
-  expect(messages).toEqual([{
-    tabId: 2,
-    message: { type: "attendance:perform", payload: { mode: "fixed", dateKey: "2026-11-13" } }
-  }]);
+  expect(requests.map(({ url, options }) => ({ url, method: options.method || "GET" }))).toEqual([
+    { url: "https://www.nodeseek.com/api/attendance/board?page=1", method: "GET" },
+    { url: "https://www.nodeseek.com/api/attendance?random=false", method: "POST" }
+  ]);
+  expect(requests.every(({ options }) => options.credentials === "include")).toBe(true);
   expect(storage.nshAutoAttendanceState.status).toBe("success");
   expect(storage.nshAttendanceReminder.gain).toBe(5);
 });
@@ -117,116 +126,39 @@ test("automatic check-in stays inactive until enabled", async () => {
   let requestCount = 0;
   const { sandbox } = createAttendanceSandbox({
     enabled: false,
-    sendMessage: async () => { requestCount += 1; return { ok: true, result: { gain: 5 } }; }
+    fetchImpl: async () => { requestCount += 1; return { ok: true, json: async () => ({ record: null }) }; }
   });
 
   await vm.runInContext("runAutoAttendance()", sandbox);
   expect(requestCount).toBe(0);
 });
 
-test("page-context check-in uses the site's same-origin board and attendance requests", async () => {
-  const contentSource = fs.readFileSync(path.resolve(__dirname, "../../src/content/auto-attendance.js"), "utf8");
-  const pageSource = fs.readFileSync(path.resolve(__dirname, "../../src/main-world/auto-attendance.js"), "utf8");
-  const requests = [];
-  const eventListeners = new Map();
-  let messageListener;
-  const window = {
-    addEventListener(type, callback) {
-      eventListeners.set(type, [...(eventListeners.get(type) || []), callback]);
-    },
-    removeEventListener(type, callback) {
-      eventListeners.set(type, (eventListeners.get(type) || []).filter((item) => item !== callback));
-    },
-    dispatchEvent(event) {
-      (eventListeners.get(event.type) || []).forEach((callback) => callback(event));
-    },
-    setTimeout,
-    clearTimeout
-  };
-  class MockCustomEvent {
-    constructor(type, options = {}) { this.type = type; this.detail = options.detail; }
-  }
-  const sandbox = vm.createContext({
-    chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
-    window,
-    CustomEvent: MockCustomEvent,
-    AbortController,
-    fetch: async (url, options = {}) => {
-      requests.push({ url, method: options.method || "GET" });
-      return options.method
-        ? { ok: true, json: async () => ({ success: true, gain: 3 }) }
-        : { ok: true, json: async () => ({ record: null }) };
-    },
-    Date: class extends Date {
-      constructor(...args) { super(...(args.length ? args : [Date.parse("2026-11-13T00:10:00.000Z")])); }
-      static now() { return Date.parse("2026-11-13T00:10:00.000Z"); }
-    },
-    Intl,
-    Number,
-    String
-  });
-  vm.runInContext(pageSource, sandbox);
-  vm.runInContext(contentSource, sandbox);
+test("background check-in calls the authenticated API directly without creating a tab", async () => {
+  const { sandbox, requests } = createAttendanceSandbox({ now: Date.parse("2026-11-13T00:10:00.000Z") });
 
-  const response = await new Promise((resolve) => {
-    messageListener({ type: "attendance:perform", payload: { mode: "random", dateKey: "2026-11-13" } }, {}, resolve);
-  });
+  const result = await vm.runInContext('requestAutoAttendance("random", "2026-11-13")', sandbox);
 
-  expect(response).toEqual({ ok: true, result: { gain: 3, alreadySigned: false } });
-  expect(requests).toEqual([
-    { url: "/api/attendance/board?page=1", method: "GET" },
-    { url: "/api/attendance?random=true", method: "POST" }
+  expect(result).toEqual({ gain: 5, alreadySigned: false });
+  expect(requests.map(({ url, options }) => ({ url, method: options.method || "GET" }))).toEqual([
+    { url: "https://www.nodeseek.com/api/attendance/board?page=1", method: "GET" },
+    { url: "https://www.nodeseek.com/api/attendance?random=true", method: "POST" }
   ]);
+  expect(requests.every(({ options }) => options.credentials === "include")).toBe(true);
 });
 
-test("page-context check-in skips the POST when today's record already exists", async () => {
-  const contentSource = fs.readFileSync(path.resolve(__dirname, "../../src/content/auto-attendance.js"), "utf8");
-  const pageSource = fs.readFileSync(path.resolve(__dirname, "../../src/main-world/auto-attendance.js"), "utf8");
-  const requests = [];
-  const eventListeners = new Map();
-  let messageListener;
-  const window = {
-    addEventListener(type, callback) {
-      eventListeners.set(type, [...(eventListeners.get(type) || []), callback]);
-    },
-    removeEventListener(type, callback) {
-      eventListeners.set(type, (eventListeners.get(type) || []).filter((item) => item !== callback));
-    },
-    dispatchEvent(event) {
-      (eventListeners.get(event.type) || []).forEach((callback) => callback(event));
-    },
-    setTimeout,
-    clearTimeout
-  };
-  class MockCustomEvent {
-    constructor(type, options = {}) { this.type = type; this.detail = options.detail; }
-  }
-  const sandbox = vm.createContext({
-    chrome: { runtime: { onMessage: { addListener(callback) { messageListener = callback; } } } },
-    window,
-    CustomEvent: MockCustomEvent,
-    AbortController,
-    fetch: async (url, options = {}) => {
-      requests.push({ url, method: options.method || "GET" });
-      return { ok: true, json: async () => ({ record: { gain: 4, created_at: "2026-11-13T00:01:00.000Z" } }) };
-    },
-    Date: class extends Date {
-      constructor(...args) { super(...(args.length ? args : [Date.parse("2026-11-13T00:10:00.000Z")])); }
-      static now() { return Date.parse("2026-11-13T00:10:00.000Z"); }
-    },
-    Intl,
-    Number,
-    String
-  });
-  vm.runInContext(pageSource, sandbox);
-  vm.runInContext(contentSource, sandbox);
-
-  const response = await new Promise((resolve) => {
-    messageListener({ type: "attendance:perform", payload: { mode: "random", dateKey: "2026-11-13" } }, {}, resolve);
+test("background check-in skips the POST when today's record already exists", async () => {
+  const { sandbox, requests } = createAttendanceSandbox({
+    now: Date.parse("2026-11-13T00:10:00.000Z"),
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ record: { gain: 4, created_at: "2026-11-13T00:01:00.000Z" } })
+    })
   });
 
-  expect(response).toEqual({ ok: true, result: { gain: 4, alreadySigned: true } });
-  expect(requests).toEqual([{ url: "/api/attendance/board?page=1", method: "GET" }]);
+  const result = await vm.runInContext('requestAutoAttendance("random", "2026-11-13")', sandbox);
+
+  expect(result).toEqual({ gain: 4, alreadySigned: true });
+  expect(requests).toHaveLength(1);
 });
 
 test("legacy Telegram send requests stay out of repeated page bridge installations", async () => {

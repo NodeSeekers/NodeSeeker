@@ -3,6 +3,7 @@ const AUTO_ATTENDANCE_STATE_KEY = "nshAutoAttendanceState";
 const AUTO_ATTENDANCE_RETRY_INTERVAL_MS = 5 * 60 * 1000;
 const AUTO_ATTENDANCE_FIRST_CHECK_DELAY_MS = 60 * 1000;
 const AUTO_ATTENDANCE_WINDOW_MS = 60 * 60 * 1000;
+const AUTO_ATTENDANCE_REQUEST_TIMEOUT_MS = 15 * 1000;
 let autoAttendanceScheduling = Promise.resolve();
 let autoAttendanceRunning = false;
 
@@ -89,7 +90,7 @@ async function runScheduledAutoAttendance() {
   });
   try {
     const mode = config.autoAttendanceMode === "fixed" ? "fixed" : "random";
-    const result = await requestAutoAttendanceInNodeSeekPage(mode, dateKey);
+    const result = await requestAutoAttendance(mode, dateKey);
     await saveAutoAttendanceResult(dateKey, "success", Number(result.gain), Date.now(), mode);
   } catch (error) {
     await chrome.storage.local.set({
@@ -105,51 +106,38 @@ async function runScheduledAutoAttendance() {
   }
 }
 
-async function requestAutoAttendanceInNodeSeekPage(mode, dateKey) {
-  const tab = await chrome.tabs.create({ url: "https://www.nodeseek.com/board", active: false });
-  const createdTabId = tab.id;
-
-  try {
-    if (createdTabId) await waitForAutoAttendanceTab(tab);
-    let lastError;
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      let response;
-      try {
-        response = await chrome.tabs.sendMessage(tab.id, {
-          type: "attendance:perform",
-          payload: { mode, dateKey }
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt < 11) await new Promise((resolve) => setTimeout(resolve, 250));
-        continue;
-      }
-      if (response?.ok !== true) throw new Error(String(response?.error || "签到请求失败"));
-      return response.result;
-    }
-    throw lastError || new Error("无法连接 NodeSeek 页面");
-  } finally {
-    if (createdTabId) {
-      await chrome.tabs.remove(createdTabId).catch(() => {});
-    }
+async function requestAutoAttendance(mode, dateKey) {
+  if (getAutoAttendanceDateKey(Date.now()) !== dateKey) {
+    throw new Error("签到日期已切换，请等待下一次检查");
   }
-}
 
-function waitForAutoAttendanceTab(tab) {
-  if (tab.status === "complete") return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => finish(new Error("NodeSeek 页面加载超时")), 20_000);
-    const listener = (tabId, changeInfo) => {
-      if (tabId === tab.id && changeInfo.status === "complete") finish();
-    };
-    function finish(error) {
-      clearTimeout(timeout);
-      chrome.tabs.onUpdated.removeListener(listener);
-      if (error) reject(error);
-      else resolve();
-    }
-    chrome.tabs.onUpdated.addListener(listener);
-  });
+  const requestOptions = {
+    credentials: "include",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(AUTO_ATTENDANCE_REQUEST_TIMEOUT_MS)
+  };
+  const boardResponse = await fetch("https://www.nodeseek.com/api/attendance/board?page=1", requestOptions);
+  if (!boardResponse.ok) throw new Error(`HTTP ${boardResponse.status}`);
+  const board = await boardResponse.json();
+  const record = board?.record || board?.detail?.record || board?.data?.record;
+  const recordTime = Date.parse(record?.created_at || "");
+  if (Number(record?.gain) > 0 && Number.isFinite(recordTime)
+      && getAutoAttendanceDateKey(recordTime) === dateKey) {
+    return { gain: Number(record.gain), alreadySigned: true };
+  }
+
+  if (getAutoAttendanceDateKey(Date.now()) !== dateKey) {
+    throw new Error("签到日期已切换，请等待下一次检查");
+  }
+  const attendanceResponse = await fetch(
+    `https://www.nodeseek.com/api/attendance?random=${mode === "random"}`,
+    { ...requestOptions, method: "POST" }
+  );
+  if (!attendanceResponse.ok) throw new Error(`HTTP ${attendanceResponse.status}`);
+  const result = await attendanceResponse.json();
+  if (result?.success !== true) throw new Error(String(result?.message || "签到失败"));
+  return { gain: Number(result.gain), alreadySigned: false };
 }
 
 async function saveAutoAttendanceResult(dateKey, status, gain, attemptedAt, mode = "random") {
