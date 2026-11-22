@@ -130,14 +130,63 @@ async function requestAutoAttendance(mode, dateKey) {
   if (getAutoAttendanceDateKey(Date.now()) !== dateKey) {
     throw new Error("签到日期已切换，请等待下一次检查");
   }
-  const attendanceResponse = await fetch(
-    `https://www.nodeseek.com/api/attendance?random=${mode === "random"}`,
-    { ...requestOptions, method: "POST" }
-  );
-  if (!attendanceResponse.ok) throw new Error(`HTTP ${attendanceResponse.status}`);
-  const result = await attendanceResponse.json();
-  if (result?.success !== true) throw new Error(String(result?.message || "签到失败"));
-  return { gain: Number(result.gain), alreadySigned: false };
+  return requestAutoAttendanceInNodeSeekPage(mode, dateKey);
+}
+
+async function requestAutoAttendanceInNodeSeekPage(mode, dateKey) {
+  const tab = await chrome.tabs.create({ url: "https://www.nodeseek.com/board", active: false });
+  if (!Number.isInteger(tab?.id)) throw new Error("无法打开 NodeSeek 签到页面");
+
+  try {
+    await waitForAutoAttendanceTab(tab);
+    let lastError;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {
+          type: "attendance:perform",
+          payload: { mode, dateKey }
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt < 11) await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      if (response?.ok !== true) throw new Error(String(response?.error || "签到请求失败"));
+      return response.result;
+    }
+    throw lastError || new Error("无法连接 NodeSeek 页面");
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+function waitForAutoAttendanceTab(tab) {
+  if (tab.status === "complete") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const timeout = setTimeout(() => finish(new Error("NodeSeek 签到页面加载超时")), 20_000);
+    const listener = (tabId, changeInfo) => {
+      if (tabId === tab.id && changeInfo.status === "complete") finish();
+    };
+    const onRemoved = (tabId) => {
+      if (tabId === tab.id) finish(new Error("NodeSeek 签到页面已关闭"));
+    };
+    const finish = (error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(listener);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      if (error) reject(error);
+      else resolve();
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    chrome.tabs.get(tab.id).then((current) => {
+      if (current.status === "complete") finish();
+    }, finish);
+  });
 }
 
 async function saveAutoAttendanceResult(dateKey, status, gain, attemptedAt, mode = "random") {

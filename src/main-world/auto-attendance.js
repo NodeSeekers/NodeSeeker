@@ -1,7 +1,20 @@
 (function () {
+  const ATTENDANCE_REQUEST_EVENT = "nodeseek-helper:perform-attendance";
+  const ATTENDANCE_RESULT_EVENT = "nodeseek-helper:attendance-result";
   const TELEGRAM_REQUEST_EVENT = "nodeseek-helper:telegram-page-request";
   const TELEGRAM_RESULT_EVENT = "nodeseek-helper:telegram-page-result";
   const TELEGRAM_PAGE_REQUEST_TIMEOUT_MS = 15_000;
+  const ATTENDANCE_REQUEST_TIMEOUT_MS = 15_000;
+
+  window.addEventListener(ATTENDANCE_REQUEST_EVENT, (event) => {
+    const detail = event.detail || {};
+    performAutoAttendance(detail.payload)
+      .then((result) => dispatchAttendanceResult(detail.requestId, { ok: true, result }))
+      .catch((error) => dispatchAttendanceResult(detail.requestId, {
+        ok: false,
+        error: String(error?.message || "签到失败").slice(0, 120)
+      }));
+  });
 
   window.addEventListener(TELEGRAM_REQUEST_EVENT, (event) => {
     const detail = event.detail || {};
@@ -12,6 +25,26 @@
         error: String(error?.message || "NodeSeek 私信请求失败").slice(0, 300)
       }));
   });
+
+  async function performAutoAttendance(payload) {
+    const dateKey = getAutoAttendanceDateKey(Date.now());
+    if (payload?.dateKey !== dateKey) {
+      throw new Error("签到日期已切换，请等待下一次检查");
+    }
+
+    const mode = payload?.mode === "fixed" ? "fixed" : "random";
+    const response = await fetch("/api/attendance?random=" + (mode === "random"), {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(ATTENDANCE_REQUEST_TIMEOUT_MS)
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    if (result?.success !== true) throw new Error(String(result?.message || "签到失败"));
+    return { gain: Number(result.gain), alreadySigned: false };
+  }
 
   async function performTelegramPageRequest(detail) {
     if (detail.operation === "mark-conversation-read") {
@@ -143,6 +176,23 @@
     window.dispatchEvent(new CustomEvent(TELEGRAM_RESULT_EVENT, {
       detail: { requestId, ...result }
     }));
+  }
+
+  function dispatchAttendanceResult(requestId, result) {
+    window.dispatchEvent(new CustomEvent(ATTENDANCE_RESULT_EVENT, {
+      detail: { requestId, ...result }
+    }));
+  }
+
+  function getAutoAttendanceDateKey(timestamp) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(timestamp);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
   }
 
   async function fetchWithTimeout(input, options = {}, timeoutMs = TELEGRAM_PAGE_REQUEST_TIMEOUT_MS) {
