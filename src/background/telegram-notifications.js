@@ -48,6 +48,7 @@ const TELEGRAM_ACTIVITY_PAGE_SIZE = 10;
 const TELEGRAM_OUTGOING_ECHO_LIMIT = 200;
 const TELEGRAM_OUTGOING_ECHO_TTL_MS = 2 * 60 * 60 * 1000;
 const TELEGRAM_OUTGOING_ECHO_PENDING_TIMEOUT_MS = 30 * 1000;
+const TELEGRAM_DM_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1000;
 const TELEGRAM_TOPIC_UNREAD_MARKER_TYPE = "topic-icon-eyes";
 const TELEGRAM_DM_DEFAULT_TOPIC_NAME = "NodeSeek 用户";
 const TELEGRAM_SETTINGS_CALLBACK_PREFIX = "nsh:";
@@ -466,7 +467,7 @@ function hasPendingTelegramOutgoingReadTracking(config) {
     && typeof config[TELEGRAM_KEYS.outgoingReadStatuses] === "object"
     ? Object.values(config[TELEGRAM_KEYS.outgoingReadStatuses]) : [];
   const now = Date.now();
-  return echoes.some((echo) => echo?.userId && echo?.originChatId && echo?.originTopicId
+  return echoes.some((echo) => echo?.status !== "rejected" && echo?.userId && echo?.originChatId && echo?.originTopicId
       && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS)
     || statuses.some((status) => status?.userId && status?.messageId);
 }
@@ -1681,33 +1682,37 @@ async function rememberTelegramOutgoingEcho(userIdValue, contentValue, origin = 
       .filter((echo) => echo?.userId && echo?.fingerprint
         && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS);
     const id = String(origin.echoId || crypto.randomUUID());
-    if (echoes.some((echo) => echo.id === id)) return id;
-    echoes.push({
-      id,
-      userId,
-      fingerprint,
-      originChatId,
-      originTopicId,
-      originTopicName,
-      baselineMessageId: conversationCursor == null ? "" : String(conversationCursor),
-      status: "sending",
-      createdAt: now
-    });
+    const existing = echoes.find((echo) => echo.id === id);
+    if (existing) {
+      if (origin.replaceFingerprint !== true || existing.fingerprint === fingerprint) return existing.fingerprint;
+      existing.fingerprint = fingerprint;
+    } else {
+      echoes.push({
+        id,
+        userId,
+        fingerprint,
+        originChatId,
+        originTopicId,
+        originTopicName,
+        baselineMessageId: conversationCursor == null ? "" : String(conversationCursor),
+        status: "sending",
+        createdAt: now
+      });
+    }
     await chrome.storage.local.set({
       [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes.slice(-TELEGRAM_OUTGOING_ECHO_LIMIT)
     });
-    return id;
+    return fingerprint;
   });
 }
 
-async function findNodeSeekOutgoingMessageForTelegramEcho(userIdValue, contentValue, baselineMessageIdValue) {
+async function findNodeSeekOutgoingMessageForTelegramEcho(userIdValue, expectedFingerprint, baselineMessageIdValue) {
   const userId = String(userIdValue || "").trim();
   const baselineMessageId = Number(baselineMessageIdValue);
   if (!userId || !Number.isFinite(baselineMessageId)) return null;
   const currentUser = await fetchLuckyCurrentUser("https://www.nodeseek.com/");
   const currentUserId = String(currentUser?.member_id || "").trim();
   if (!currentUserId) throw new Error("无法确认当前 NodeSeek 账号，暂时无法核对发送结果");
-  const expectedFingerprint = await getTelegramOutgoingEchoFingerprint(userId, contentValue);
   const conversation = await fetchNodeSeekConversationMessages(userId);
   for (const message of conversation.msgArray) {
     if (String(message?.sender_id || "") !== currentUserId
@@ -1750,14 +1755,16 @@ async function consumeTelegramOutgoingEcho(userIdValue, contentValue, messageIdV
     const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.outgoingMessageEchoes]: [] });
     const previousEchoes = Array.isArray(stored[TELEGRAM_KEYS.outgoingMessageEchoes])
       ? stored[TELEGRAM_KEYS.outgoingMessageEchoes] : [];
-    const echoes = previousEchoes.filter((echo) => echo?.userId && echo?.fingerprint
+    const echoes = previousEchoes.filter((echo) => echo?.status !== "rejected" && echo?.userId && echo?.fingerprint
       && now - Number(echo.createdAt) <= TELEGRAM_OUTGOING_ECHO_TTL_MS);
-    const matchIndex = echoes.findIndex((echo) => {
+    const matches = (echo) => {
       if (echo.userId !== userId || echo.fingerprint !== fingerprint) return false;
       const hasBaseline = echo.baselineMessageId !== "" && echo.baselineMessageId != null
         && Number.isFinite(Number(echo.baselineMessageId));
       return !hasBaseline || Number(messageIdValue) > Number(echo.baselineMessageId);
-    });
+    };
+    let matchIndex = echoes.findIndex((echo) => echo.status !== "unconfirmed" && matches(echo));
+    if (matchIndex < 0) matchIndex = echoes.findIndex(matches);
     if (matchIndex < 0) {
       if (echoes.length !== previousEchoes.length) {
         await chrome.storage.local.set({ [TELEGRAM_KEYS.outgoingMessageEchoes]: echoes });
@@ -3378,10 +3385,12 @@ async function processTelegramManagedTopicUpdates(token, updates) {
 
   const orderedUpdates = [...updates].sort((a, b) => Number(a.update_id) - Number(b.update_id));
   const queuedKeys = new Set(pendingQueue.map((item) => String(item.key)));
+  const failedUpdateIds = new Set(pendingQueue.filter((item) => item.sendFailure)
+    .flatMap((item) => item.updates.map((update) => String(update?.update_id || ""))));
   for (const updateGroup of groupTelegramManagedTopicUpdates(orderedUpdates)) {
     const pendingUpdates = updateGroup.filter((update) => {
       const updateId = String(Number(update?.update_id) || "");
-      return updateId && !processedUpdateIds.has(updateId);
+      return updateId && !processedUpdateIds.has(updateId) && !failedUpdateIds.has(updateId);
     });
     if (pendingUpdates.length === 0) continue;
     const message = pendingUpdates.map((update) => update?.message).find(Boolean);
@@ -3411,6 +3420,12 @@ async function processTelegramManagedTopicUpdates(token, updates) {
     });
   }
   pendingQueue.sort((a, b) => Number(a.updateIds?.[0]) - Number(b.updateIds?.[0]));
+  for (const item of pendingQueue) {
+    if (item.echoId && item.sendAttempted !== false && !Number(item.sendAttemptedAt)) {
+      item.sendAttempted = true;
+      item.sendAttemptedAt = Number(item.createdAt) || Date.now();
+    }
+  }
   await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue });
 
   const blockedTopics = new Set();
@@ -3425,15 +3440,21 @@ async function processTelegramManagedTopicUpdates(token, updates) {
       pendingQueue = pendingQueue.filter((item) => item.key !== queueItem.key);
       continue;
     }
+    if (queueItem.sendFailure) continue;
     const messages = pendingUpdates.map((update) => update?.message).filter(Boolean);
-    const message = messages[0];
     const { chatId, topicId, nsUserId, name: topicName } = queueItem.topic;
     const topicKey = `${chatId}:${topicId}`;
-    if (blockedTopics.has(topicKey) || Number(queueItem.nextRetryAt) > Date.now()) {
+    const confirmationDeadline = getTelegramDmConfirmationDeadline(queueItem);
+    const now = Date.now();
+    if (blockedTopics.has(topicKey) || (Number(queueItem.nextRetryAt) > now
+        && (!confirmationDeadline || confirmationDeadline > now))) {
       blockedTopics.add(topicKey);
       continue;
     }
     try {
+    if (confirmationDeadline && confirmationDeadline <= now) {
+      throw new Error("NodeSeek 私信回执核对超时");
+    }
 
     const text = [...new Set(messages
       .map((item) => String(item.text || item.caption || "").trim())
@@ -3473,7 +3494,7 @@ async function processTelegramManagedTopicUpdates(token, updates) {
         }
       }
 
-      const content = [text, ...imageMarkdowns].filter(Boolean).join("\n\n");
+      const content = [...imageMarkdowns, text].filter(Boolean).join("\n\n");
       let echoId = String(queueItem.echoId || "");
       let baselineMessageId = queueItem.baselineMessageId;
       if (!echoId) {
@@ -3485,16 +3506,18 @@ async function processTelegramManagedTopicUpdates(token, updates) {
         await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue });
       }
 
-      await rememberTelegramOutgoingEcho(nsUserId, content, {
+      const expectedFingerprint = await rememberTelegramOutgoingEcho(nsUserId, content, {
         chatId,
         topicId,
         topicName,
         echoId,
+        replaceFingerprint: queueItem.sendAttempted === false,
         ...(baselineMessageId != null ? { baselineMessageId } : {})
       });
 
       if (queueItem.sendAttempted === false) {
         queueItem.sendAttempted = true;
+        queueItem.sendAttemptedAt = Date.now();
         await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue });
         try {
           await sendNodeSeekPrivateMessage(nsUserId, content, imageMarkdowns.length > 0);
@@ -3503,7 +3526,11 @@ async function processTelegramManagedTopicUpdates(token, updates) {
           throw error;
         }
       } else if (baselineMessageId == null || !String(baselineMessageId).trim()
-          || !await findNodeSeekOutgoingMessageForTelegramEcho(nsUserId, content, baselineMessageId)) {
+          || !await promiseWithTimeout(
+            findNodeSeekOutgoingMessageForTelegramEcho(nsUserId, expectedFingerprint, baselineMessageId),
+            Math.max(1, confirmationDeadline - Date.now()),
+            "NodeSeek 私信回执核对"
+          )) {
         throw new Error("NodeSeek 私信发送结果待核对");
       }
       await updateTelegramOutgoingEchoStatus(echoId, "sent");
@@ -3528,18 +3555,42 @@ async function processTelegramManagedTopicUpdates(token, updates) {
     await chrome.storage.local.set({ [TELEGRAM_KEYS.pendingTopicReadUserIds]: [...pendingReads] });
     } catch (error) {
       queueItem.attempts = (Number(queueItem.attempts) || 0) + 1;
-      const delayMs = getTelegramUpdatesRetryDelayMs(queueItem.attempts, error?.retryAfterSeconds);
-      queueItem.nextRetryAt = Date.now() + delayMs;
-      queueItem.lastError = String(error?.message || error || "发送失败").slice(0, 300);
+      const failedAt = Date.now();
+      const deadline = getTelegramDmConfirmationDeadline(queueItem);
+      const rejected = error?.code === "NODESEEK_DM_REJECTED";
+      const expired = deadline > 0 && deadline <= failedAt;
+      if (rejected || expired) {
+        queueItem.sendFailure = rejected ? "rejected" : "confirmation-timeout";
+        queueItem.nextRetryAt = 0;
+      } else {
+        const retryAt = failedAt + getTelegramUpdatesRetryDelayMs(queueItem.attempts, error?.retryAfterSeconds);
+        queueItem.nextRetryAt = deadline ? Math.min(deadline, retryAt) : retryAt;
+      }
+      queueItem.lastError = expired && !rejected ? "NodeSeek 私信回执核对超时"
+        : String(error?.message || error || "发送失败").slice(0, 300);
       pendingQueue = pendingQueue.map((item) => item.key === queueItem.key ? queueItem : item);
       await chrome.storage.local.set({
         [TELEGRAM_KEYS.pendingTopicUpdates]: pendingQueue,
-        [TELEGRAM_KEYS.lastError]: `TG 私信待重试：${queueItem.lastError}`
+        [TELEGRAM_KEYS.lastError]: queueItem.sendFailure
+          ? `TG 私信已停止重试：${queueItem.lastError}`
+          : `TG 私信待重试：${queueItem.lastError}`
       });
-      blockedTopics.add(topicKey);
+      if (queueItem.sendFailure) {
+        if (queueItem.echoId) {
+          await updateTelegramOutgoingEchoStatus(queueItem.echoId, rejected ? "rejected" : "unconfirmed").catch(() => {});
+        }
+      } else {
+        blockedTopics.add(topicKey);
+      }
     }
   }
   await processPendingTelegramTopicReads();
+}
+
+function getTelegramDmConfirmationDeadline(queueItem) {
+  const attemptedAt = Number(queueItem.sendAttemptedAt);
+  return queueItem.sendAttempted === true && attemptedAt > 0
+    ? attemptedAt + TELEGRAM_DM_CONFIRMATION_TIMEOUT_MS : 0;
 }
 
 async function processPendingTelegramTopicReads() {
@@ -3658,51 +3709,66 @@ async function uploadTelegramMessageImage(tokenValue, image) {
 async function sendNodeSeekPrivateMessage(receiverUid, content, markdown = false) {
   const recipientId = Number(receiverUid);
   if (!Number.isSafeInteger(recipientId) || recipientId <= 0) throw new Error("NodeSeek 用户 ID 无效");
+  await ensureNodeSeekPrivateMessageSendingEnabled();
   let page;
   try {
-    page = await openNodeSeekTelegramPage();
+    page = await openNodeSeekTelegramPage(true);
   } catch (error) {
-    throw Object.assign(new Error(error?.message || "无法打开 NodeSeek 页面"), {
+    throw Object.assign(new Error(error?.message || "无法打开 NodeSeek 私信页面"), {
       code: "NODESEEK_DM_NOT_DISPATCHED"
     });
   }
 
   try {
-    const monitor = await chrome.storage.local.get({ [TELEGRAM_KEYS.paused]: false });
-    if (monitor[TELEGRAM_KEYS.paused] === true) {
-      throw Object.assign(new Error("Telegram 监控已暂停"), { code: "NODESEEK_DM_NOT_DISPATCHED" });
-    }
-    const [execution] = await chrome.scripting.executeScript({
+    await ensureNodeSeekPrivateMessageSendingEnabled();
+    const [execution] = await promiseWithTimeout(chrome.scripting.executeScript({
       target: { tabId: page.tab.id, frameIds: [0] },
       world: "ISOLATED",
       func: postNodeSeekPrivateMessageInPage,
       args: [{ receiverUid: recipientId, content: String(content), markdown: Boolean(markdown) }]
-    });
+    }), 20_000, "NodeSeek 私信页面请求");
     if (execution?.result?.ok !== true) {
       const error = new Error(execution?.result?.error || "NodeSeek 私信发送结果待核对");
       if (execution?.result?.notDispatched === true) error.code = "NODESEEK_DM_NOT_DISPATCHED";
+      if (execution?.result?.rejected === true) error.code = "NODESEEK_DM_REJECTED";
       throw error;
     }
   } finally {
-    if (page.createdTabId) await chrome.tabs.remove(page.createdTabId).catch(() => {});
+    await chrome.tabs.remove(page.createdTabId).catch(() => {});
+  }
+}
+
+async function ensureNodeSeekPrivateMessageSendingEnabled() {
+  try {
+    const monitor = await chrome.storage.local.get({ [TELEGRAM_KEYS.paused]: false });
+    if (monitor[TELEGRAM_KEYS.paused] === true) throw new Error("Telegram 监控已暂停");
+  } catch (error) {
+    throw Object.assign(new Error(error?.message || "无法读取 Telegram 监控状态"), {
+      code: "NODESEEK_DM_NOT_DISPATCHED"
+    });
   }
 }
 
 async function postNodeSeekPrivateMessageInPage(payload) {
-  if (location.origin !== "https://www.nodeseek.com") {
-    return { ok: false, notDispatched: true, error: "NodeSeek 页面已切换" };
+  if (location.origin !== "https://www.nodeseek.com" || location.pathname !== "/notification") {
+    return { ok: false, notDispatched: true, error: "NodeSeek 私信页面已切换" };
   }
   try {
     const response = await fetch("/api/notification/message/send", {
       method: "POST",
       credentials: "include",
+      cache: "no-store",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(15_000)
     });
     const result = await response.json();
     if (!response.ok || result?.success !== true) {
-      return { ok: false, error: String(result?.message || `NodeSeek 私信发送失败（HTTP ${response.status}）`).slice(0, 300) };
+      return {
+        ok: false,
+        rejected: response.status === 403 && result?.success === false,
+        error: String(result?.message || `NodeSeek 私信发送失败（HTTP ${response.status}）`).slice(0, 300)
+      };
     }
     return { ok: true };
   } catch (error) {
@@ -3767,17 +3833,28 @@ function isTelegramNodeSeekPageReceiverUnavailable(error) {
 function waitForNodeSeekTelegramTab(tab) {
   if (tab.status === "complete") return Promise.resolve();
   return new Promise((resolve, reject) => {
+    let done = false;
     const timeout = setTimeout(() => finish(new Error("NodeSeek 页面加载超时")), 20_000);
     const listener = (tabId, changeInfo) => {
       if (tabId === tab.id && changeInfo.status === "complete") finish();
     };
+    const onRemoved = (tabId) => {
+      if (tabId === tab.id) finish(new Error("NodeSeek 页面已关闭"));
+    };
     const finish = (error) => {
+      if (done) return;
+      done = true;
       clearTimeout(timeout);
       chrome.tabs.onUpdated.removeListener(listener);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
       if (error) reject(error);
       else resolve();
     };
     chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    chrome.tabs.get(tab.id).then((current) => {
+      if (current.status === "complete") finish();
+    }, finish);
   });
 }
 
