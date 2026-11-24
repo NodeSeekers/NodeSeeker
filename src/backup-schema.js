@@ -14,6 +14,7 @@ const BACKUP_DATABASE_STORE_NAMES = Object.freeze([
 // These values represent unfinished external actions or temporary UI sessions.
 // Restoring them could replay messages, reads, or one-time Telegram commands.
 const BACKUP_OMITTED_LOCAL_KEYS = Object.freeze([
+  "telegramTopicDiagnostics",
   "telegramPendingTopicUpdates",
   "telegramPendingTopicImageMarkdowns",
   "telegramPendingTopicReadUserIds",

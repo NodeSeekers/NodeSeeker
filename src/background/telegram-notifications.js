@@ -18,6 +18,7 @@ const TELEGRAM_KEYS = {
   systemNotificationUserId: "telegramSystemNotificationUserId",
   managedTopics: "telegramManagedTopics",
   settingsTopics: "telegramSettingsTopics",
+  topicDiagnostics: "telegramTopicDiagnostics",
   settingsTopicIconId: "telegramSettingsTopicIconId",
   settingsTopicIconVersion: "telegramSettingsTopicIconVersion",
   deliveryReceipts: "telegramDeliveryReceipts",
@@ -2363,7 +2364,14 @@ async function sendPendingTelegramUsernameCopyNotice(tokenValue, topic) {
   }
 }
 
-async function normalizeManagedSystemTopic(chatIdValue, systemUserIdValue, tokenValue = "") {
+function normalizeManagedSystemTopic(chatIdValue, systemUserIdValue, tokenValue = "") {
+  return serializeTelegramStorageMutation("topics", () =>
+    normalizeManagedSystemTopicUnlocked(chatIdValue, systemUserIdValue, tokenValue));
+}
+
+// Hold the topic lock across the read, Telegram edit, and storage write. Otherwise
+// this migration can overwrite a topic created or recovered while the edit waits.
+async function normalizeManagedSystemTopicUnlocked(chatIdValue, systemUserIdValue, tokenValue = "") {
   const chatId = String(chatIdValue || "").trim();
   const systemUserId = String(systemUserIdValue || "").trim();
   const token = String(tokenValue || "").trim();
@@ -2396,6 +2404,11 @@ async function normalizeManagedSystemTopic(chatIdValue, systemUserIdValue, token
     const normalizedTopics = topics.filter((topic) => !candidates.includes(topic));
     normalizedTopics.splice(Math.min(firstCandidateIndex, normalizedTopics.length), 0, canonicalTopic);
     await chrome.storage.local.set({ [TELEGRAM_KEYS.managedTopics]: normalizedTopics });
+    await recordTelegramTopicDiagnostic("system_mapping_migrated", {
+      chatId, topicId: canonicalTopic.topicId, mappingId: canonicalTopic.id,
+      candidateTopicIds: candidates.map((topic) => String(topic.topicId)),
+      mappingCountBefore: topics.length, mappingCountAfter: normalizedTopics.length
+    });
   }
   return canonicalTopic;
 }
@@ -2404,6 +2417,64 @@ async function getOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, op
   const topic = await serializeTelegramStorageMutation("topics", () =>
     findOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, options));
   return sendPendingTelegramUsernameCopyNotice(tokenValue, topic);
+}
+
+function formatTelegramTopicDiagnosticError(error, token = "") {
+  let message = String(error?.message || error || "未知错误");
+  if (token) message = message.split(token).join("[redacted]");
+  return message.replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/\b\d+:[A-Za-z0-9_-]{15,}\b/g, "[redacted]").slice(0, 300);
+}
+
+async function recordTelegramTopicDiagnostic(event, details) {
+  try {
+    await serializeTelegramStorageMutation("topic-diagnostics", async () => {
+      const stored = await chrome.storage.local.get({ [TELEGRAM_KEYS.topicDiagnostics]: [] });
+      const entries = Array.isArray(stored[TELEGRAM_KEYS.topicDiagnostics])
+        ? stored[TELEGRAM_KEYS.topicDiagnostics] : [];
+      await chrome.storage.local.set({
+        [TELEGRAM_KEYS.topicDiagnostics]: [...entries, { at: Date.now(), event, ...details }].slice(-200)
+      });
+    });
+  } catch (_error) {
+    // A diagnostic storage failure must not interrupt delivery or topic recovery.
+  }
+}
+
+// Only topic creation and failed-thread recovery are recorded. Never pass a
+// message payload, a user/topic name, a request URL, or a bot token to the log.
+async function createTelegramTopicWithDiagnostics(token, payload, context, saveMapping) {
+  const diagnostic = { ...context, chainId: context.chainId || crypto.randomUUID(), chatId: String(payload.chat_id) };
+  let stage = "request";
+  let topicId = "";
+  let httpStatus = 0;
+  let telegramErrorCode = 0;
+  await recordTelegramTopicDiagnostic("create_requested", diagnostic);
+  try {
+    const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/createForumTopic`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    httpStatus = Number(response.status) || 0;
+    const result = await response.json();
+    telegramErrorCode = Number(result?.error_code) || 0;
+    topicId = String(result?.result?.message_thread_id || "");
+    if (!response.ok || result?.ok !== true || !topicId) {
+      throw new Error(result?.description || `创建 Telegram Topic 失败（HTTP ${response.status}）`);
+    }
+    stage = "save_mapping";
+    await recordTelegramTopicDiagnostic("create_received", { ...diagnostic, topicId, httpStatus });
+    const topic = await saveMapping(topicId);
+    await recordTelegramTopicDiagnostic("mapping_saved", { ...diagnostic, topicId, mappingId: topic.id });
+    return topic;
+  } catch (error) {
+    await recordTelegramTopicDiagnostic("create_failed", {
+      ...diagnostic, stage, topicId, httpStatus, telegramErrorCode,
+      error: formatTelegramTopicDiagnosticError(error, token)
+    });
+    throw error;
+  }
 }
 
 async function findOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, { userId = "", userName = "" } = {}) {
@@ -2420,7 +2491,7 @@ async function findOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, {
   const topics = Array.isArray(stored[TELEGRAM_KEYS.managedTopics]) ? stored[TELEGRAM_KEYS.managedTopics] : [];
   if (kind === "system") {
     const storedSystemUser = await chrome.storage.local.get({ [TELEGRAM_KEYS.systemNotificationUserId]: "" });
-    const existingSystemTopic = await normalizeManagedSystemTopic(
+    const existingSystemTopic = await normalizeManagedSystemTopicUnlocked(
       chatId,
       storedSystemUser[TELEGRAM_KEYS.systemNotificationUserId],
       token
@@ -2435,37 +2506,28 @@ async function findOrCreateManagedTelegramTopic(tokenValue, chatIdValue, kind, {
 
   const newTopicName = (topicName || TELEGRAM_DM_DEFAULT_TOPIC_NAME).slice(0, 128);
   const style = getManagedTelegramTopicStyle({ kind });
-  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/createForumTopic`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      name: newTopicName,
-      icon_color: style.iconColor,
-      ...(style.iconCustomEmojiId ? { icon_custom_emoji_id: style.iconCustomEmojiId } : {})
-    })
-  });
-  const result = await response.json();
-  const topicId = String(result?.result?.message_thread_id || "");
-  if (!response.ok || !result?.ok || !topicId) {
-    throw new Error(result?.description || `创建 Telegram Topic 失败（HTTP ${response.status}）`);
-  }
-
-  const topic = {
-    id: crypto.randomUUID(),
-    kind,
-    chatId,
-    topicId,
+  return createTelegramTopicWithDiagnostics(token, {
+    chat_id: chatId,
     name: newTopicName,
-    iconCustomEmojiId: style.iconCustomEmojiId,
-    iconColor: style.iconColor,
-    ...(kind === "dm" ? { dmAnimalIconVersion: 1 } : {}),
-    nsUserId,
-    ...(kind === "dm" && dmTopicName ? { usernameCopyNoticePending: true } : {}),
-    createdAt: Date.now()
-  };
-  await chrome.storage.local.set({ [TELEGRAM_KEYS.managedTopics]: [...topics, topic] });
-  return topic;
+    icon_color: style.iconColor,
+    ...(style.iconCustomEmojiId ? { icon_custom_emoji_id: style.iconCustomEmojiId } : {})
+  }, { reason: "mapping_missing", kind, nsUserId, mappingCount: topics.length }, async (topicId) => {
+    const topic = {
+      id: crypto.randomUUID(),
+      kind,
+      chatId,
+      topicId,
+      name: newTopicName,
+      iconCustomEmojiId: style.iconCustomEmojiId,
+      iconColor: style.iconColor,
+      ...(kind === "dm" ? { dmAnimalIconVersion: 1 } : {}),
+      nsUserId,
+      ...(kind === "dm" && dmTopicName ? { usernameCopyNoticePending: true } : {}),
+      createdAt: Date.now()
+    };
+    await chrome.storage.local.set({ [TELEGRAM_KEYS.managedTopics]: [...topics, topic] });
+    return topic;
+  });
 }
 
 async function getTelegramUpdatesAndProcess(
@@ -2700,6 +2762,7 @@ async function processTelegramDeletedTopicUpdatesUnlocked(updates) {
       [TELEGRAM_KEYS.managedTopics]: retainedManaged,
       [TELEGRAM_KEYS.settingsTopics]: retainedSettings
     });
+    await recordTelegramTopicDiagnostic("mapping_deleted_by_update", { deletedTopicKeys: deleted });
   }
 }
 
@@ -2742,35 +2805,26 @@ async function findOrCreateTelegramSettingsTopic(tokenValue, chatIdValue) {
     return existing;
   }
 
-  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/createForumTopic`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      name: style.name,
-      icon_color: style.iconColor,
-      ...(iconCustomEmojiId ? { icon_custom_emoji_id: iconCustomEmojiId } : {})
-    })
-  });
-  const result = await response.json();
-  const topicId = String(result?.result?.message_thread_id || "");
-  if (!response.ok || result?.ok !== true || !topicId) {
-    throw new Error(result?.description || `创建 Telegram ${style.name} 主题失败（HTTP ${response.status}）`);
-  }
-
-  const topic = {
-    id: crypto.randomUUID(),
-    kind: "settings",
-    chatId,
-    topicId,
+  return createTelegramTopicWithDiagnostics(token, {
+    chat_id: chatId,
     name: style.name,
-    iconCustomEmojiId,
-    iconColor: style.iconColor,
-    menuMessageId: 0,
-    createdAt: Date.now()
-  };
-  await chrome.storage.local.set({ [TELEGRAM_KEYS.settingsTopics]: [...settingsTopics, topic] });
-  return topic;
+    icon_color: style.iconColor,
+    ...(iconCustomEmojiId ? { icon_custom_emoji_id: iconCustomEmojiId } : {})
+  }, { reason: "mapping_missing", kind: "settings", mappingCount: settingsTopics.length }, async (topicId) => {
+    const topic = {
+      id: crypto.randomUUID(),
+      kind: "settings",
+      chatId,
+      topicId,
+      name: style.name,
+      iconCustomEmojiId,
+      iconColor: style.iconColor,
+      menuMessageId: 0,
+      createdAt: Date.now()
+    };
+    await chrome.storage.local.set({ [TELEGRAM_KEYS.settingsTopics]: [...settingsTopics, topic] });
+    return topic;
+  });
 }
 
 async function getTelegramSettingsTopicIconCustomEmojiId() {
@@ -3079,13 +3133,13 @@ function isTelegramTopicNotFoundError(error) {
   return /message thread not found|topic(?:\s+or\s+thread)? not found|\bTOPIC_ID_INVALID\b/i.test(String(error?.message || ""));
 }
 
-function recreateTelegramTopic(tokenValue, chatIdValue, oldTopicIdValue, topicReference = null) {
-  return serializeTelegramStorageMutation("topics", () => recreateTelegramTopicUnlocked(tokenValue, chatIdValue, oldTopicIdValue, topicReference));
+function recreateTelegramTopic(tokenValue, chatIdValue, oldTopicIdValue, topicReference = null, diagnostic = {}) {
+  return serializeTelegramStorageMutation("topics", () => recreateTelegramTopicUnlocked(tokenValue, chatIdValue, oldTopicIdValue, topicReference, diagnostic));
 }
 
 const recoveredTelegramTopicIds = new Map();
 
-async function recreateTelegramTopicUnlocked(tokenValue, chatIdValue, oldTopicIdValue, topicReference = null) {
+async function recreateTelegramTopicUnlocked(tokenValue, chatIdValue, oldTopicIdValue, topicReference = null, diagnostic = {}) {
   const token = String(tokenValue || "").trim();
   const chatId = String(chatIdValue || "").trim();
   const oldTopicId = String(oldTopicIdValue || "").trim();
@@ -3110,6 +3164,9 @@ async function recreateTelegramTopicUnlocked(tokenValue, chatIdValue, oldTopicId
     const replacement = replacementId && mappings.flatMap(({ topics }) => topics)
       .find((topic) => String(topic.chatId) === chatId && String(topic.topicId) === replacementId);
     if (replacement && topicReference) Object.assign(topicReference, { topicId: replacementId });
+    await recordTelegramTopicDiagnostic(replacement ? "recovery_reused" : "recovery_mapping_missing", {
+      ...diagnostic, chatId, oldTopicId, topicId: replacement?.topicId || ""
+    });
     return replacement || null;
   }
 
@@ -3125,43 +3182,37 @@ async function recreateTelegramTopicUnlocked(tokenValue, chatIdValue, oldTopicId
     ...(iconColor ? { icon_color: iconColor } : {}),
     ...(iconCustomEmojiId ? { icon_custom_emoji_id: iconCustomEmojiId } : {})
   };
-  const response = await fetchWithTimeout(`https://api.telegram.org/bot${token}/createForumTopic`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+  return createTelegramTopicWithDiagnostics(token, payload, {
+    ...diagnostic, reason: "thread_rejected", kind: existingTopic.kind,
+    mappingId: existingTopic.id, oldTopicId
+  }, async (topicId) => {
+    const updatedTopic = {
+      ...existingTopic,
+      topicId,
+      name,
+      iconColor: iconColor || existingTopic.iconColor,
+      ...(iconCustomEmojiId ? { iconCustomEmojiId } : {}),
+      createdAt: Date.now(),
+      ...(existingTopic.kind === "settings" ? {
+        menuMessageId: 0,
+        replyKeyboardMessageId: 0,
+        replyKeyboardVersion: 0,
+        selectedDialogIds: []
+      } : {})
+    };
+    const latest = await chrome.storage.local.get({ [mapping.key]: [] });
+    await chrome.storage.local.set({
+      [mapping.key]: latest[mapping.key].map((topic) => topic.id === existingTopic.id
+        && String(topic.topicId) === oldTopicId ? { ...topic, ...updatedTopic } : topic)
+    });
+    recoveredTelegramTopicIds.set(`${chatId}:${oldTopicId}`, topicId);
+    if (recoveredTelegramTopicIds.size > 100) recoveredTelegramTopicIds.delete(recoveredTelegramTopicIds.keys().next().value);
+    if (topicReference && typeof topicReference === "object") {
+      topicReference.topicId = topicId;
+      if (existingTopic.kind === "settings") Object.assign(topicReference, updatedTopic);
+    }
+    return updatedTopic;
   });
-  const result = await response.json();
-  const topicId = String(result?.result?.message_thread_id || "");
-  if (!response.ok || result?.ok !== true || !topicId) {
-    throw new Error(result?.description || `Telegram ${name} 主题重建失败（HTTP ${response.status}）`);
-  }
-
-  const updatedTopic = {
-    ...existingTopic,
-    topicId,
-    name,
-    iconColor: iconColor || existingTopic.iconColor,
-    ...(iconCustomEmojiId ? { iconCustomEmojiId } : {}),
-    createdAt: Date.now(),
-    ...(existingTopic.kind === "settings" ? {
-      menuMessageId: 0,
-      replyKeyboardMessageId: 0,
-      replyKeyboardVersion: 0,
-      selectedDialogIds: []
-    } : {})
-  };
-  const latest = await chrome.storage.local.get({ [mapping.key]: [] });
-  await chrome.storage.local.set({
-    [mapping.key]: latest[mapping.key].map((topic) => topic.id === existingTopic.id
-      && String(topic.topicId) === oldTopicId ? { ...topic, ...updatedTopic } : topic)
-  });
-  recoveredTelegramTopicIds.set(`${chatId}:${oldTopicId}`, topicId);
-  if (recoveredTelegramTopicIds.size > 100) recoveredTelegramTopicIds.delete(recoveredTelegramTopicIds.keys().next().value);
-  if (topicReference && typeof topicReference === "object") {
-    topicReference.topicId = topicId;
-    if (existingTopic.kind === "settings") Object.assign(topicReference, updatedTopic);
-  }
-  return updatedTopic;
 }
 
 async function callTelegramSettingsApi(tokenValue, method, payload, topicReference = null, allowTopicRecovery = true) {
@@ -3177,14 +3228,35 @@ async function callTelegramSettingsApi(tokenValue, method, payload, topicReferen
     error.telegramResponseReceived = true;
     error.httpStatus = response.status;
     error.retryAfterSeconds = Number(result?.parameters?.retry_after) || 0;
-    if (allowTopicRecovery
-        && ["sendMessage", "sendPhoto"].includes(method)
+    if (["sendMessage", "sendPhoto"].includes(method)
         && Number(payload?.message_thread_id) > 0
         && isTelegramTopicNotFoundError(error)) {
-      const topic = await recreateTelegramTopic(token, payload.chat_id, payload.message_thread_id, topicReference);
+      const diagnostic = {
+        chainId: crypto.randomUUID(), method, chatId: String(payload.chat_id),
+        oldTopicId: String(payload.message_thread_id), targetType: String(topicReference?.type || ""),
+        httpStatus: response.status, telegramErrorCode: Number(result?.error_code) || 0,
+        error: formatTelegramTopicDiagnosticError(error, token), allowTopicRecovery
+      };
+      await recordTelegramTopicDiagnostic("send_thread_rejected", diagnostic);
+      if (!allowTopicRecovery) throw error;
+      const topic = await recreateTelegramTopic(token, payload.chat_id, payload.message_thread_id, topicReference, { chainId: diagnostic.chainId });
       if (topic) {
         payload.message_thread_id = Number(topic.topicId);
-        return callTelegramSettingsApi(token, method, payload, topicReference, false);
+        try {
+          const delivered = await callTelegramSettingsApi(token, method, payload, topicReference, false);
+          await recordTelegramTopicDiagnostic("recovery_send_succeeded", {
+            chainId: diagnostic.chainId, method, chatId: String(payload.chat_id),
+            oldTopicId: diagnostic.oldTopicId, topicId: String(topic.topicId)
+          });
+          return delivered;
+        } catch (retryError) {
+          await recordTelegramTopicDiagnostic("recovery_send_failed", {
+            chainId: diagnostic.chainId, method, chatId: String(payload.chat_id),
+            oldTopicId: diagnostic.oldTopicId, topicId: String(topic.topicId),
+            error: formatTelegramTopicDiagnosticError(retryError, token)
+          });
+          throw retryError;
+        }
       }
     }
     throw error;

@@ -2500,3 +2500,145 @@ test("startup blocks notification polls until the offline baselines are installe
   await checks;
   expect(reads).toHaveLength(2);
 });
+
+for (const recoverExisting of [false, true]) {
+  test(`polling system-topic migration preserves concurrent RSS ${recoverExisting ? "recovery" : "creation"}`, async () => {
+    const stored = {
+      telegramSystemNotificationUserId: "999",
+      telegramMessageCursors: {},
+      telegramManagedTopics: [
+        { id: "system", kind: "system", chatId: "333", topicId: "100", nsUserId: "", name: "旧系统名" },
+        ...(recoverExisting ? [{ id: "rss", kind: "rss", chatId: "333", topicId: "111", name: "监控" }] : [])
+      ],
+      telegramSettingsTopics: [],
+      telegramKeywordRules: ["preserved"]
+    };
+    let editStarted;
+    let releaseEdit;
+    const started = new Promise((resolve) => { editStarted = resolve; });
+    const editGate = new Promise((resolve) => { releaseEdit = resolve; });
+    let creations = 0;
+    const deliveries = [];
+    const sandbox = createSandbox(async (url, options = {}) => {
+      if (url.includes("/api/notification/message/list")) {
+        return { ok: true, json: async () => ({ success: true, msgArray: [] }) };
+      }
+      const method = url.split("/").pop();
+      const body = JSON.parse(options.body || "{}");
+      if (method === "editForumTopic") {
+        if (body.message_thread_id === 100) { editStarted(); await editGate; }
+        return { ok: true, json: async () => ({ ok: true, result: true }) };
+      }
+      if (method === "createForumTopic") {
+        creations++;
+        return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_thread_id: 200 + creations } }) };
+      }
+      if (method === "sendMessage") {
+        if (body.message_thread_id === 111) {
+          return { ok: false, status: 400, json: async () => ({ ok: false, error_code: 400, description: "Bad Request: message thread not found" }) };
+        }
+        deliveries.push(body.message_thread_id);
+        return { ok: true, status: 200, json: async () => ({ ok: true, result: {} }) };
+      }
+      throw new Error(`Unexpected mock request: ${method}`);
+    });
+    sandbox.chrome = { storage: { local: {
+      get: async (defaults) => structuredClone({ ...defaults, ...stored }),
+      set: async (values) => Object.assign(stored, structuredClone(values))
+    } } };
+    sandbox.config = { telegramBotToken: "fake", telegramTargets: [{ type: "personal", chatId: "333" }] };
+    const polling = vm.runInContext("checkForNewNodeSeekMessages(config)", sandbox);
+    await started;
+    const rss = vm.runInContext('sendTelegramActivityNotification(config, "rss", "private test content")', sandbox);
+    await new Promise(setImmediate);
+    releaseEdit();
+    await Promise.all([polling, rss]);
+    expect(stored.telegramManagedTopics.find((topic) => topic.kind === "rss")?.topicId).toBe("201");
+    await vm.runInContext('sendTelegramActivityNotification(config, "rss", "another post")', sandbox);
+    expect(creations).toBe(1);
+    expect(deliveries).toEqual([201, 201]);
+    expect(stored.telegramKeywordRules).toEqual(["preserved"]);
+    const creation = stored.telegramTopicDiagnostics.find((entry) => entry.event === "create_requested");
+    expect(creation.reason).toBe(recoverExisting ? "thread_rejected" : "mapping_missing");
+    expect(JSON.stringify(stored.telegramTopicDiagnostics)).not.toContain("private test content");
+  });
+}
+
+test("topic diagnostics retain the rejected request, original Telegram error, replacement and retry as one chain", async () => {
+  const token = "12345:private-token";
+  const stored = {
+    telegramManagedTopics: [{ id: "reply", kind: "reply", chatId: "333", topicId: "111", name: "回复" }]
+  };
+  const sandbox = createSandbox(async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url.endsWith("/createForumTopic")) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_thread_id: 222 } }) };
+    }
+    if (body.message_thread_id === 111) {
+      return { ok: false, status: 400, json: async () => ({ ok: false, error_code: 400, description: "Bad Request: message thread not found" }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: {} }) };
+  });
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => structuredClone({ ...defaults, ...stored }),
+    set: async (values) => Object.assign(stored, structuredClone(values))
+  } } };
+  sandbox.token = token;
+  await vm.runInContext('sendTelegramMessage(token, { type: "personal", chatId: "333", topicId: "111" }, "SECRET message")', sandbox);
+  const entries = stored.telegramTopicDiagnostics;
+  expect(entries.map((e) => e.event)).toEqual([
+    "send_thread_rejected", "create_requested", "create_received", "mapping_saved", "recovery_send_succeeded"
+  ]);
+  expect(new Set(entries.map((e) => e.chainId)).size).toBe(1);
+  expect(entries[0]).toMatchObject({ method: "sendMessage", oldTopicId: "111", httpStatus: 400, telegramErrorCode: 400, error: "Bad Request: message thread not found" });
+  expect(entries[3]).toMatchObject({ oldTopicId: "111", topicId: "222", mappingId: "reply" });
+  const before = JSON.stringify(entries);
+  await vm.runInContext('sendTelegramMessage(token, { type: "personal", chatId: "333", topicId: "222" }, "normal")', sandbox);
+  expect(JSON.stringify(stored.telegramTopicDiagnostics)).toBe(before);
+  expect(before).not.toContain(token);
+  expect(before).not.toContain("SECRET");
+});
+
+test("topic diagnostics distinguish an ambiguous create response from a mapping save failure", async () => {
+  for (const failureStage of ["request", "save_mapping"]) {
+    const token = "12345:private-token";
+    const stored = { telegramManagedTopics: [] };
+    const sandbox = createSandbox(async () => {
+      if (failureStage === "request") throw new Error(`Failed to fetch https://api.telegram.org/bot${token}/createForumTopic`);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_thread_id: 222 } }) };
+    });
+    sandbox.chrome = { storage: { local: {
+      get: async (defaults) => structuredClone({ ...defaults, ...stored }),
+      set: async (values) => {
+        if (Object.hasOwn(values, "telegramManagedTopics")) throw new Error("Storage unavailable");
+        Object.assign(stored, structuredClone(values));
+      }
+    } } };
+    sandbox.token = token;
+    await expect(Promise.resolve(vm.runInContext('getOrCreateManagedTelegramTopic(token, "333", "rss")', sandbox))).rejects.toThrow(/Failed to fetch|Storage unavailable/);
+    const failure = stored.telegramTopicDiagnostics.at(-1);
+    expect(failure).toMatchObject({ event: "create_failed", reason: "mapping_missing", stage: failureStage, topicId: failureStage === "request" ? "" : "222" });
+    expect(stored.telegramManagedTopics).toEqual([]);
+    expect(JSON.stringify(stored.telegramTopicDiagnostics)).not.toContain(token);
+  }
+});
+
+test("topic diagnostics are bounded and their storage failures cannot prevent recovery", async () => {
+  const stored = { telegramTopicDiagnostics: [], telegramManagedTopics: [] };
+  const sandbox = createSandbox(async () => ({ ok: true, json: async () => ({ ok: true, result: { message_thread_id: 222 } }) }));
+  let failLogging = false;
+  sandbox.chrome = { storage: { local: {
+    get: async (defaults) => structuredClone({ ...defaults, ...stored }),
+    set: async (values) => {
+      if (failLogging && Object.hasOwn(values, "telegramTopicDiagnostics")) throw new Error("Log unavailable");
+      Object.assign(stored, structuredClone(values));
+    }
+  } } };
+  await vm.runInContext('Promise.all(Array.from({ length: 205 }, (_, index) => recordTelegramTopicDiagnostic("test", { index })))', sandbox);
+  expect(stored.telegramTopicDiagnostics).toHaveLength(200);
+  expect(stored.telegramTopicDiagnostics[0].index).toBe(5);
+  failLogging = true;
+  const topic = await vm.runInContext('getOrCreateManagedTelegramTopic("fake", "333", "rss")', sandbox);
+  expect(topic.topicId).toBe("222");
+  expect(stored.telegramManagedTopics[0].topicId).toBe("222");
+});
