@@ -3,6 +3,55 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 
+test.use({ channel: "chromium" });
+
+test("signature effects fit the text and preserve its links", async ({ page }) => {
+  const url = "https://www.nodeseek.com/post-1-1";
+  await page.route(url, (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><style>
+      .signature { width: 700px; padding-top: 5px; overflow: hidden; }
+      .signature p { margin: 5px 0; }
+    </style><article class="content-item">
+      <div class="signature"><p><a href="/post-2-1">我的探针</a> ｜ VPS</p></div>
+    </article>`
+  }));
+  await page.goto(url);
+  const root = path.resolve(__dirname, "../..");
+  for (const file of ["src/avatar-effects.css", "src/content.css"]) {
+    await page.addStyleTag({ path: path.join(root, file) });
+  }
+  for (const file of ["src/shortcuts.js", "src/content/config.js", "src/content/follow-rules.js"]) {
+    await page.addScriptTag({ path: path.join(root, file) });
+  }
+  await page.evaluate(() => {
+    featureOptions.followRules = {
+      signatureGroups: [{ items: ["探针"], styles: { signatureEffect: "particles" } }]
+    };
+    scanFollowRules();
+  });
+  const signature = page.locator(".signature");
+  await expect(signature.locator(".nsh-follow-signature-keyword-hit")).toHaveText("探针");
+  const bounds = await signature.locator(".nsh-follow-signature-effect").evaluate((effect) => {
+    const range = document.createRange();
+    range.selectNodeContents(effect.closest(".signature").querySelector("p"));
+    return {
+      effectWidth: effect.getBoundingClientRect().width,
+      textWidth: range.getBoundingClientRect().width
+    };
+  });
+  expect(bounds.effectWidth).toBeGreaterThanOrEqual(bounds.textWidth);
+  expect(bounds.effectWidth - bounds.textWidth).toBeLessThanOrEqual(8);
+
+  await page.evaluate(() => {
+    featureOptions.followRules = {};
+    scanFollowRules();
+  });
+  await expect(signature.locator(".nsh-follow-signature-effect")).toHaveCount(0);
+  await expect(signature.locator(":scope > p > a")).toHaveAttribute("href", "/post-2-1");
+  await expect(signature).toHaveText("我的探针 ｜ VPS");
+});
+
 test("keyword editors explain invalid syntax and keep paused rules in place", async () => {
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), "nodeseek-keyword-rules-"));
   const extension = path.resolve(__dirname, "../..");
@@ -46,6 +95,11 @@ test("keyword editors explain invalid syntax and keep paused rules in place", as
         rules: [activeRule("content-alpha", "alpha"), pausedRule("content-bravo", "bravo"), activeRule("content-charlie", "charlie")],
         styles: {}
       }],
+      signatureGroups: [{
+        id: "test-signature-group", name: "签名探针", enabled: true,
+        rules: [activeRule("signature-probe", "探针")],
+        styles: { signatureEffect: "rainbow" }
+      }],
       userGroups: []
     };
     const telegramKeywordRules = [
@@ -70,6 +124,33 @@ test("keyword editors explain invalid syntax and keep paused rules in place", as
     await page.goto(`chrome-extension://${extensionId}/options/options.html`);
     await page.waitForFunction(() => document.querySelector("#followKeywordGroups")?.children.length > 0);
     await page.locator('[data-panel-target="block-filter-panel"]').click();
+    const signatureList = page.locator("#followSignatureGroups");
+    await expect(signatureList).toHaveClass(/follow-rule-card-grid/);
+    const signatureGroup = signatureList.locator(".follow-rule-row").filter({ hasText: "签名探针" });
+    await expect(signatureGroup.locator(".follow-rule-card-switch input")).toBeChecked();
+    await signatureGroup.locator(".follow-rule-row-expand").click();
+    const signatureRules = signatureGroup.locator(".follow-rule-inline-editor .telegram-keyword-rule");
+    await expect(signatureRules).toHaveCount(1);
+    await signatureGroup.locator('[data-follow-rule-item-list="items"]').fill("探针,VPS");
+    await signatureGroup.locator(".follow-rule-keyword-entry").getByRole("button", { name: "添加" }).click();
+    await expect(signatureRules).toHaveCount(2);
+    await signatureGroup.getByRole("button", { name: "样式" }).click();
+    const signatureStyle = page.locator("#followRuleStyleDialogBody");
+    await expect(signatureStyle.locator(".follow-rule-signature-effect-control")).toHaveCount(1);
+    await expect(signatureStyle.locator(".follow-rule-style-option")).toHaveCount(0);
+    await expect(signatureStyle).not.toContainText("标题颜色");
+    await expect(signatureStyle).not.toContainText("边框颜色");
+    await expect(signatureStyle.locator(".follow-rule-signature-preview")).toContainText("探针");
+    await signatureStyle.locator(".follow-rule-signature-effect-control select").selectOption("cosmos");
+    await page.locator("#confirmFollowRuleStyleDialog").click();
+    await expect.poll(() => worker.evaluate(async () => {
+      const state = await chrome.storage.local.get("followRules");
+      return {
+        terms: state.followRules.signatureGroups[0].rules.map((rule) => rule.terms),
+        signatureEffect: state.followRules.signatureGroups[0].styles.signatureEffect
+      };
+    })).toEqual({ terms: [["探针"], ["探针", "VPS"]], signatureEffect: "cosmos" });
+
     const group = page.locator("#followKeywordGroups .follow-rule-row").filter({ hasText: "回归测试" });
     await group.locator(".follow-rule-row-expand").click();
     const contentRules = group.locator(".follow-rule-inline-editor .telegram-keyword-rule");

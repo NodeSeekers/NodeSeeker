@@ -36,6 +36,7 @@ const PROFILE_LABEL_SIZE_OPTIONS = ["large", "standard", "small"];
 const DEFAULT_PROFILE_LABEL_SIZE = "standard";
 const DEFAULT_FOLLOW_RULES = {
   keywordGroups: [],
+  signatureGroups: [],
   userGroups: []
 };
 const DEFAULT_OPTIONS = {

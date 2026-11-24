@@ -7,6 +7,15 @@
   overflow: visible !important;
 }
 
+.nsh-signature-effect-host {
+  --nsh-avatar-effect-inset: 0px;
+  overflow: hidden !important;
+}
+
+.nsh-signature-effect-host > .nsh-follow-signature-effect {
+  z-index: -1;
+}
+
 .nsh-avatar-effect,
 .nsh-avatar-effect-layer {
   position: absolute;

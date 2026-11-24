@@ -39,6 +39,18 @@ test("one restore action restores config-only without data loss and replaces a c
         telegramBotToken: "",
         telegramChatId: "stale-legacy-chat",
         telegramKeywordRules: [{ id: "backup-rule", terms: ["keep"], mode: "all", enabled: true }],
+        followRules: {
+          keywordGroups: [],
+          signatureGroups: [{
+            id: "signature-group", name: "签名规则", enabled: true,
+            rules: [{
+              id: "signature-rule", enabled: true,
+              termGroups: [["探针", "VPS"], ["在线"]], excludeTerms: ["失效"]
+            }],
+            styles: { signatureEffect: "particles" }
+          }],
+          userGroups: []
+        },
         telegramManagedTopics: [{ nsUserId: "42", topicId: "92", name: "backup-topic" }],
         telegramMessageCursors: { "42:92": "123" },
         telegramPersonalStartOffset: 121,
@@ -69,9 +81,15 @@ test("one restore action restores config-only without data loss and replaces a c
     expect(configBackup.schema).toBe("nodeseek-helper-config");
     expect(configBackup.options.telegramKeywordRules[0].id).toBe("backup-rule");
     expect(configBackup.options.telegramManagedTopics[0].topicId).toBe("92");
+    expect(configBackup.options.followRules.signatureGroups[0]).toMatchObject({
+      id: "signature-group",
+      rules: [{ termGroups: [["探针", "VPS"], ["在线"]], excludeTerms: ["失效"] }],
+      styles: { signatureEffect: "particles" }
+    });
     expect(backup.schema).toBe("nodeseek-helper-full-backup");
     expect(backup.configuration.options.telegramKeywordRules[0].id).toBe("backup-rule");
     expect(backup.configuration.options.telegramManagedTopics[0].topicId).toBe("92");
+    expect(backup.configuration.options.followRules).toEqual(configBackup.options.followRules);
     expect(backup.localState.telegramMessageCursors["42:92"]).toBe("123");
     expect(backup.localState.telegramPersonalStartOffset).toBe(121);
     expect(backup.localState).not.toHaveProperty("telegramPendingTopicUpdates");
@@ -86,16 +104,18 @@ test("one restore action restores config-only without data loss and replaces a c
 
     await worker.evaluate(() => chrome.storage.local.set({
       telegramKeywordRules: [{ id: "config-change", terms: ["changed"], mode: "all", enabled: true }],
-      telegramManagedTopics: [{ nsUserId: "42", topicId: "998", name: "config-change" }]
+      telegramManagedTopics: [{ nsUserId: "42", topicId: "998", name: "config-change" }],
+      followRules: { keywordGroups: [], signatureGroups: [], userGroups: [] }
     }));
     await page.evaluate(async config => restoreConfigBackup(config), configBackup);
     const afterConfigRestore = await worker.evaluate(async () => ({
-      settings: await chrome.storage.local.get(["telegramKeywordRules", "telegramManagedTopics", "telegramTargets", "telegramChatId"]),
+      settings: await chrome.storage.local.get(["followRules", "telegramKeywordRules", "telegramManagedTopics", "telegramTargets", "telegramChatId"]),
       profile: await withTransaction([STORE_PROFILES], "readonly", async ({ profiles }) =>
         requestToPromise(profiles.get("backup-user")))
     }));
     expect(afterConfigRestore.settings.telegramKeywordRules[0].id).toBe("backup-rule");
     expect(afterConfigRestore.settings.telegramManagedTopics[0].topicId).toBe("92");
+    expect(afterConfigRestore.settings.followRules).toEqual(configBackup.options.followRules);
     expect(afterConfigRestore.settings.telegramTargets).toEqual([]);
     expect(afterConfigRestore.settings).not.toHaveProperty("telegramChatId");
     expect(afterConfigRestore.profile.memberName).toBe("Backup User");
@@ -104,6 +124,7 @@ test("one restore action restores config-only without data loss and replaces a c
       await chrome.storage.local.set({
         telegramKeywordRules: [{ id: "changed-rule", terms: ["changed"], mode: "all", enabled: true }],
         telegramManagedTopics: [{ nsUserId: "42", topicId: "999", name: "changed-topic" }],
+        followRules: { keywordGroups: [], signatureGroups: [], userGroups: [] },
         telegramPendingTopicUpdates: [{ updateId: 2002, text: "current pending is cleared on full restore" }]
       });
       await withTransaction([STORE_PROFILES], "readwrite", async ({ profiles }) => {
@@ -126,6 +147,7 @@ test("one restore action restores config-only without data loss and replaces a c
 
     const restored = await worker.evaluate(async () => {
       const storage = await chrome.storage.local.get([
+        "followRules",
         "telegramKeywordRules",
         "telegramManagedTopics",
         "telegramMessageCursors",
@@ -140,6 +162,7 @@ test("one restore action restores config-only without data loss and replaces a c
 
     expect(restored.storage.telegramKeywordRules[0].id).toBe("backup-rule");
     expect(restored.storage.telegramManagedTopics[0].topicId).toBe("92");
+    expect(restored.storage.followRules).toEqual(configBackup.options.followRules);
     expect(restored.storage.telegramMessageCursors["42:92"]).toBe("123");
     expect(restored.storage).not.toHaveProperty("telegramPendingTopicUpdates");
     expect(restored.profiles.backup.memberName).toBe("Backup User");

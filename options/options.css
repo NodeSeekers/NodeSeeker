@@ -2149,6 +2149,33 @@ textarea.telegram-blocked-keywords {
   font-weight: 700;
 }
 
+.follow-rule-signature-preview {
+  --nsh-avatar-effect-inset: 0px;
+  --nsh-avatar-image-radius: 4px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 180px;
+  min-height: 42px;
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: 4px;
+  background: var(--options-control-bg);
+  color: var(--options-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.follow-rule-signature-preview .nsh-follow-signature-keyword-hit {
+  position: relative;
+  z-index: 1;
+  border-radius: 2px;
+  padding-inline: 2px;
+  background: rgba(255, 190, 0, 0.24);
+  box-shadow: inset 0 -1px rgba(255, 166, 0, 0.9);
+  font-weight: 700;
+}
+
 .dialog.follow-rule-dialog {
   width: min(680px, 100%);
   max-height: calc(100vh - 40px);

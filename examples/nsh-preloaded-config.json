@@ -18,6 +18,7 @@
     "blockedUsers": [],
     "followRules": {
       "keywordGroups": [],
+      "signatureGroups": [],
       "userGroups": []
     },
     "readingNavigationEnabled": true,

@@ -100,7 +100,7 @@ test("automatic check-in retries five minutes after a failed attempt", async () 
   expect(alarms.created[0].schedule.when).toBe(now + 3 * 60_000);
 });
 
-test("midnight alarm draws one daily time and never signs before it", async () => {
+test("midnight alarm draws one daily time inside the first ten minutes and never signs before it", async () => {
   const now = Date.parse("2026-11-12T16:00:00.000Z");
   let draws = 0;
   const { sandbox, alarms, storage, requests } = createAttendanceSandbox({
@@ -114,7 +114,7 @@ test("midnight alarm draws one daily time and never signs before it", async () =
   expect(draws).toBe(1);
   const planned = storage.nshAutoAttendanceState.scheduledAt;
   expect(planned).toBeGreaterThan(now);
-  expect(planned).toBeLessThan(now + 60 * 60_000);
+  expect(planned).toBeLessThan(now + 10 * 60_000);
   expect(alarms.created.map((alarm) => alarm.schedule.when)).toEqual([planned, planned]);
 });
 

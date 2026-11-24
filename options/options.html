@@ -259,13 +259,20 @@
 
           <section class="config-group" aria-labelledby="followRulesTitle">
             <h3 id="followRulesTitle">标记规则</h3>
-            <p class="config-description">关键词标记显示在帖子列表，用户标记也可显示在帖子详情。</p>
+            <p class="config-description">关键词标记显示在帖子列表；签名规则检查帖子详情中的发帖和回帖签名，命中后对整条签名应用特效并高亮命中词；用户标记也可显示在帖子详情。</p>
             <div class="follow-rule-section" aria-labelledby="followKeywordRulesTitle">
               <div class="follow-rule-section-heading">
                 <h4 id="followKeywordRulesTitle">关键词</h4>
                 <button id="addFollowKeywordGroup" type="button">新建组</button>
               </div>
               <div id="followKeywordGroups" class="follow-rule-list"></div>
+            </div>
+            <div class="follow-rule-section" aria-labelledby="followSignatureRulesTitle">
+              <div class="follow-rule-section-heading">
+                <h4 id="followSignatureRulesTitle">签名</h4>
+                <button id="addFollowSignatureGroup" type="button">新建组</button>
+              </div>
+              <div id="followSignatureGroups" class="follow-rule-list"></div>
             </div>
             <div class="follow-rule-section" aria-labelledby="followUserRulesTitle">
               <div class="follow-rule-section-heading">
@@ -372,7 +379,7 @@
                 <option value="fixed">固定 5 个鸡腿</option>
               </select>
             </label>
-            <p class="config-description">开启后，保持 Chrome 运行并登录 NodeSeek。插件每天在 UTC+8 的 00:00–01:00 随机安排签到。错过时段会在浏览器启动后补签，失败后每 5 分钟重试。</p>
+            <p class="config-description">开启后，保持 Chrome 运行并登录 NodeSeek。插件每天在 UTC+8 的 00:00–00:10 随机安排签到。错过时段会在浏览器启动后补签，失败后每 5 分钟重试。</p>
           </section>
 
           <section class="config-group" aria-labelledby="quickJumpTitle">

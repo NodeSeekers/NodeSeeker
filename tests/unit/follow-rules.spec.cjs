@@ -23,7 +23,7 @@ function createSandbox() {
 function createMutationSandbox(initialRules) {
   const stored = { followRules: initialRules };
   const sandbox = createSandbox();
-  sandbox.DEFAULT_FOLLOW_RULES = { keywordGroups: [], userGroups: [] };
+  sandbox.DEFAULT_FOLLOW_RULES = { keywordGroups: [], signatureGroups: [], userGroups: [] };
   sandbox.featureOptions = { followRules: initialRules };
   sandbox.chrome = {
     storage: {
@@ -58,6 +58,37 @@ function getKeywordDecoration(sandbox, title, group) {
       authorName: "",
       avatarElement: null
     }, { keywordGroups: normalized, userGroups: [] });
+  })()`, sandbox);
+}
+
+function getSignatureDecoration(sandbox, signature, group, type = "detail") {
+  sandbox.__signatureText = signature;
+  sandbox.__signatureGroup = group;
+  sandbox.__contextType = type;
+  return vm.runInContext(`(() => {
+    const normalized = normalizeFollowRules({ signatureGroups: [__signatureGroup] });
+    const groups = normalized.signatureGroups
+      .filter((entry) => entry.enabled)
+      .map((entry) => ({
+        ...entry,
+        rules: entry.rules.map((rule) => ({
+          ...rule,
+          normalizedItems: rule.terms.map((item) => item.toLocaleLowerCase()),
+          normalizedTermGroups: rule.termGroups.map((terms) => terms.map((item) => item.toLocaleLowerCase())),
+          normalizedExcludedItems: rule.excludeTerms.map((item) => item.toLocaleLowerCase())
+        }))
+      }));
+    const decoration = getFollowRuleDecoration({
+      type: __contextType,
+      titleText: "",
+      signatureText: __signatureText,
+      signatureElement: {},
+      titleElement: null,
+      authorElement: null,
+      authorName: "",
+      avatarElement: {}
+    }, { keywordGroups: [], signatureGroups: groups, userGroups: [] });
+    return { normalized: normalized.signatureGroups[0], decoration };
   })()`, sandbox);
 }
 
@@ -157,6 +188,74 @@ test("content keyword group keeps independent RSS-style rules and evaluates them
     .toEqual(["测试"]);
 });
 
+test("signature groups match only detail signatures and keep avatar effect as their only style", () => {
+  const sandbox = createSandbox();
+  const group = {
+    id: "signature-probe",
+    name: "签名探针",
+    enabled: true,
+    rules: [{
+      id: "signature-probe-rule",
+      terms: ["针", "探针", "VPS"],
+      termGroups: [["针", "探针"], ["VPS"]],
+      excludeTerms: ["已出"]
+    }],
+    styles: {
+      signatureEffect: "cosmos",
+      showGroupName: true,
+      titleColor: { enabled: true, color: "#ff0000" }
+    }
+  };
+
+  const matched = getSignatureDecoration(sandbox, "我的探针 ｜ VPS剩余价值计算器", group);
+  expect(matched.decoration.signatureEffect).toBe("cosmos");
+  expect(matched.decoration.avatarEffect).toBe("");
+  expect(matched.decoration.signatureTerms).toEqual(["针", "探针", "vps"]);
+  expect(matched.decoration.groupBadges).toEqual([]);
+  expect(matched.decoration.titleColor).toBe("");
+  expect(matched.normalized.styles.showGroupName).toBe(false);
+  expect(matched.normalized.styles.titleColor.enabled).toBe(false);
+  expect(matched.normalized.styles.signatureEffect).toBe("cosmos");
+  expect(getSignatureDecoration(sandbox, "我的探针 ｜ VPS 已出", group).decoration).toBeNull();
+  expect(getSignatureDecoration(sandbox, "我的探针 ｜ VPS剩余价值计算器", group, "list").decoration).toBeNull();
+});
+
+test("detail target context reads the signature element text", () => {
+  const sandbox = createSandbox();
+  sandbox.__root = {
+    querySelector(selector) {
+      return selector === ".signature" ? { textContent: "  我的探针 ｜ VPS  " } : null;
+    },
+    querySelectorAll() { return []; }
+  };
+
+  const signatureText = vm.runInContext('getFollowRuleTargetContext(__root, true).signatureText', sandbox);
+  expect(signatureText).toBe("我的探针 ｜ VPS");
+});
+
+test("signature rule groups persist separately from title and user rules", () => {
+  const sandbox = createOptionsSandbox();
+  const savedValue = vm.runInContext(`(() => {
+    followRulesDraft = {
+      keywordGroups: [],
+      signatureGroups: [{
+        id: "signature-group",
+        name: "签名探针",
+        enabled: true,
+        rules: [{ id: "signature-rule", terms: ["探针"], termGroups: [["探针"]], excludeTerms: [] }],
+        styles: { signatureEffect: "particles" }
+      }],
+      userGroups: []
+    };
+    return readFollowRulesFromForm();
+  })()`, sandbox);
+
+  expect(savedValue.signatureGroups[0].rules[0].terms).toEqual(["探针"]);
+  expect(savedValue.signatureGroups[0].styles.signatureEffect).toBe("particles");
+  expect(savedValue.keywordGroups).toEqual([]);
+  expect(savedValue.userGroups).toEqual([]);
+});
+
 test("options editor keeps match mode and excluded terms in the persisted rule value", () => {
   const sandbox = createOptionsSandbox();
   const savedValue = vm.runInContext(`(() => {
@@ -171,6 +270,7 @@ test("options editor keeps match mode and excluded terms in the persisted rule v
         ],
         styles: {}
       }],
+      signatureGroups: [],
       userGroups: []
     };
     return readFollowRulesFromForm();

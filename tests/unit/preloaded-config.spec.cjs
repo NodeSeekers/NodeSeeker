@@ -41,20 +41,23 @@ test("bundled config seeds settings and ignores runtime keys", async () => {
 
   expect(imported).toBe(true);
   expect(storage.autoAttendanceEnabled).toBe(true);
+  expect(storage.followRules).toEqual({ keywordGroups: [], signatureGroups: [], userGroups: [] });
   expect(storage.telegramTargets).toEqual([{ type: "direct", chatId: "-1001", topicId: "12" }]);
   expect(storage.nshAutoAttendanceState).toBeUndefined();
   expect(storage.nshPreloadedConfigImported).toBe(true);
 });
 
 test("bundled config fills missing settings without overwriting saved values", async () => {
+  const savedRules = { keywordGroups: [{ id: "saved-group" }], userGroups: [] };
   const { sandbox, storage } = createPreloadedConfigSandbox({
-    saved: { autoAttendanceEnabled: false, imageUploadEnabled: true },
+    saved: { autoAttendanceEnabled: false, imageUploadEnabled: true, followRules: savedRules },
     payload: {
       schema: "nodeseek-helper-preloaded-config",
       version: 1,
       options: {
         autoAttendanceEnabled: true,
         imageUploadEnabled: false,
+        followRules: { keywordGroups: [], signatureGroups: [], userGroups: [] },
         telegramBotToken: "bundled-token",
         telegramTargets: [{ type: "direct", chatId: "-1001", topicId: "12" }]
       }
@@ -66,9 +69,25 @@ test("bundled config fills missing settings without overwriting saved values", a
   expect(imported).toBe(true);
   expect(storage.autoAttendanceEnabled).toBe(false);
   expect(storage.imageUploadEnabled).toBe(true);
+  expect(storage.followRules).toEqual(savedRules);
   expect(storage.telegramBotToken).toBe("bundled-token");
   expect(storage.telegramTargets).toEqual([{ type: "direct", chatId: "-1001", topicId: "12" }]);
   expect(storage.nshPreloadedConfigImported).toBe(true);
+});
+
+test("older first-install presets get an empty signature rule list without losing other rules", async () => {
+  const keywordGroups = [{ id: "keyword-group", items: ["探针"] }];
+  const userGroups = [{ id: "user-group", items: ["example-user"] }];
+  const { sandbox, storage } = createPreloadedConfigSandbox({
+    payload: {
+      schema: "nodeseek-helper-preloaded-config",
+      version: 1,
+      options: { followRules: { keywordGroups, userGroups } }
+    }
+  });
+
+  expect(await vm.runInContext("importPreloadedConfiguration()", sandbox)).toBe(true);
+  expect(storage.followRules).toEqual({ keywordGroups, signatureGroups: [], userGroups });
 });
 
 test("first-install config seeds every listed option, including system notification defaults", async () => {

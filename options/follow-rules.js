@@ -5,6 +5,12 @@ const FOLLOW_RULE_TYPE_CONFIG = {
     itemLabel: "关键词",
     itemPlaceholder: "输入关键词"
   },
+  signature: {
+    collectionKey: "signatureGroups",
+    groupLabel: "标记签名组",
+    itemLabel: "签名关键词",
+    itemPlaceholder: "输入签名关键词"
+  },
   user: {
     collectionKey: "userGroups",
     groupLabel: "标记用户组",
@@ -44,8 +50,10 @@ const FOLLOW_RULE_AVATAR_EFFECT_LAYER_COUNTS = {
 };
 
 const followKeywordGroupsNode = document.querySelector("#followKeywordGroups");
+const followSignatureGroupsNode = document.querySelector("#followSignatureGroups");
 const followUserGroupsNode = document.querySelector("#followUserGroups");
 const addFollowKeywordGroupButton = document.querySelector("#addFollowKeywordGroup");
+const addFollowSignatureGroupButton = document.querySelector("#addFollowSignatureGroup");
 const addFollowUserGroupButton = document.querySelector("#addFollowUserGroup");
 const followRuleDialog = document.querySelector("#followRuleDialog");
 const followRuleDialogTitle = document.querySelector("#followRuleDialogTitle");
@@ -59,6 +67,7 @@ const cancelFollowRuleStyleDialogButton = document.querySelector("#cancelFollowR
 const confirmFollowRuleStyleDialogButton = document.querySelector("#confirmFollowRuleStyleDialog");
 let followRulesDraft = {
   keywordGroups: [],
+  signatureGroups: [],
   userGroups: []
 };
 let pendingFollowRuleEditor = null;
@@ -67,6 +76,7 @@ let expandedFollowRuleGroupId = "";
 let draggedFollowRuleKeywordId = "";
 
 addFollowKeywordGroupButton.addEventListener("click", createAndExpandFollowKeywordGroup);
+addFollowSignatureGroupButton.addEventListener("click", () => createAndExpandFollowRuleCardGroup("signature"));
 addFollowUserGroupButton.addEventListener("click", () => openFollowRuleEditor("user"));
 cancelFollowRuleDialogButton.addEventListener("click", closeFollowRuleDialog);
 confirmFollowRuleDialogButton.addEventListener("click", confirmFollowRuleDialog);
@@ -99,11 +109,17 @@ function normalizeFollowRules(value) {
   const source = isFollowRuleObject(value) ? value : {};
   const usedIds = new Set();
   const keywordGroups = normalizeFollowRuleGroups(source.keywordGroups, "keyword", usedIds);
+  const signatureGroups = normalizeFollowRuleGroups(source.signatureGroups, "signature", usedIds);
   const userGroups = normalizeFollowRuleGroups(source.userGroups, "user", usedIds);
   return {
     keywordGroups: removeDuplicateFollowRuleItems(keywordGroups, "keyword"),
+    signatureGroups: removeDuplicateFollowRuleItems(signatureGroups, "signature"),
     userGroups
   };
+}
+
+function isFollowRuleKeywordType(type) {
+  return type === "keyword" || type === "signature";
 }
 
 function normalizeFollowRuleGroups(value, type, usedIds) {
@@ -123,7 +139,7 @@ function normalizeFollowRuleGroups(value, type, usedIds) {
         enabled: group.enabled !== false,
         styles: normalizeFollowRuleStyles(group.styles, type)
       };
-      if (type === "keyword") {
+      if (isFollowRuleKeywordType(type)) {
         normalizedGroup.rules = normalizeFollowRuleKeywordRules(group, normalizedGroup.id, usedIds);
       } else {
         normalizedGroup.items = normalizeFollowRuleItems(group.items);
@@ -182,11 +198,15 @@ function normalizeFollowRuleStyles(value, type = "") {
       ? normalizeFollowRuleAvatarEffect(styles.avatarEffect)
       : "none"
   };
+  if (type === "signature") {
+    normalized.showGroupName = false;
+    normalized.signatureEffect = normalizeFollowRuleAvatarEffect(styles.signatureEffect);
+  }
 
   Object.entries(FOLLOW_RULE_STYLE_COLOR_DEFAULTS).forEach(([key, defaultColor]) => {
     const option = isFollowRuleObject(styles[key]) ? styles[key] : {};
     normalized[key] = {
-      enabled: option.enabled === true,
+      enabled: type !== "signature" && option.enabled === true,
       color: normalizeFollowRuleColor(option.color, defaultColor)
     };
   });
@@ -212,7 +232,7 @@ function normalizeFollowRuleItems(value) {
 }
 
 function removeDuplicateFollowRuleItems(groups, type) {
-  if (type === "keyword") return groups;
+  if (isFollowRuleKeywordType(type)) return groups;
   const seen = new Set();
   return groups.map((group) => ({
     ...group,
@@ -229,7 +249,7 @@ function removeDuplicateFollowRuleItems(groups, type) {
 
 function getFollowRuleItemIdentity(type, value) {
   const normalized = normalizeFollowRuleText(value);
-  return type === "keyword" ? normalized.toLocaleLowerCase() : normalized;
+  return isFollowRuleKeywordType(type) ? normalized.toLocaleLowerCase() : normalized;
 }
 
 function normalizeFollowRuleText(value) {
@@ -271,10 +291,11 @@ function createFollowRuleGroup(type) {
     id: createFollowRuleId(),
     name: `${config.groupLabel} ${groups.length + 1}`,
     enabled: true,
-    ...(type === "keyword" ? { rules: [] } : { items: [] }),
+    ...(isFollowRuleKeywordType(type) ? { rules: [] } : { items: [] }),
     styles: normalizeFollowRuleStyles({
-      showGroupName: true,
+      showGroupName: type !== "signature",
       avatarEffect: type === "user" ? "rainbow" : "none",
+      signatureEffect: type === "signature" ? "rainbow" : "none",
       groupNameColor: {
         enabled: true,
         color: FOLLOW_RULE_STYLE_COLOR_DEFAULTS.groupNameColor
@@ -288,7 +309,7 @@ function cloneFollowRuleGroup(type, group) {
     id: group.id,
     name: group.name,
     enabled: group.enabled !== false,
-    ...(type === "keyword"
+    ...(isFollowRuleKeywordType(type)
       ? { rules: group.rules.map((rule) => ({
         ...rule,
         terms: [...rule.terms],
@@ -309,7 +330,7 @@ function setFollowRulesEditorValue(value) {
 }
 
 function readFollowRulesFromForm() {
-  ["keywordGroups", "userGroups"].forEach((collectionKey) => {
+  ["keywordGroups", "signatureGroups", "userGroups"].forEach((collectionKey) => {
     followRulesDraft[collectionKey].forEach((group) => {
       group.name = normalizeFollowRuleText(group.name);
       if (!group.name) {
@@ -323,6 +344,7 @@ function readFollowRulesFromForm() {
 
 function renderFollowRuleEditor() {
   renderFollowRuleGroups("keyword");
+  renderFollowRuleGroups("signature");
   renderFollowRuleGroups("user");
 }
 
@@ -330,7 +352,8 @@ function renderFollowRuleGroups(type) {
   const config = FOLLOW_RULE_TYPE_CONFIG[type];
   const groups = followRulesDraft[config.collectionKey];
   const list = getFollowRuleListNode(type);
-  list.classList.toggle("follow-rule-card-grid", type === "keyword");
+  const isCardGroup = isFollowRuleKeywordType(type);
+  list.classList.toggle("follow-rule-card-grid", isCardGroup);
   list.replaceChildren();
 
   if (groups.length === 0) {
@@ -347,26 +370,28 @@ function renderFollowRuleGroups(type) {
 function createFollowRuleRow(type, group) {
   const config = FOLLOW_RULE_TYPE_CONFIG[type];
   const row = document.createElement("article");
-  row.className = `follow-rule-row${type === "keyword" ? " follow-rule-keyword-card" : ""}`;
-  row.classList.toggle("is-expanded", type === "keyword" && expandedFollowRuleGroupId === group.id);
+  const isCardGroup = isFollowRuleKeywordType(type);
+  row.className = `follow-rule-row${isCardGroup ? " follow-rule-keyword-card" : ""}`;
+  row.classList.toggle("is-expanded", isCardGroup && expandedFollowRuleGroupId === group.id);
   row.classList.toggle("is-disabled", group.enabled === false);
   row.dataset.followRuleGroupId = group.id;
-  if (type === "keyword") {
-    setFollowRuleCardBorderColor(row, group);
+  row.dataset.followRuleType = type;
+  if (isCardGroup) {
+    setFollowRuleCardBorderColor(row, group, type);
     row.addEventListener("click", (event) => {
       if (event.target.closest("button, input, label, .follow-rule-inline-editor")) return;
-      toggleFollowKeywordGroupEditor(group.id);
+      toggleFollowRuleCardEditor(type, group.id);
     });
   }
 
-  const summary = document.createElement(type === "keyword" ? "button" : "div");
-  summary.className = type === "keyword"
+  const summary = document.createElement(isCardGroup ? "button" : "div");
+  summary.className = isCardGroup
     ? "follow-rule-row-summary follow-rule-row-expand follow-rule-card-title"
     : "follow-rule-row-summary";
-  if (type === "keyword") {
+  if (isCardGroup) {
     summary.type = "button";
     summary.setAttribute("aria-expanded", String(expandedFollowRuleGroupId === group.id));
-    summary.addEventListener("click", () => toggleFollowKeywordGroupEditor(group.id));
+    summary.addEventListener("click", () => toggleFollowRuleCardEditor(type, group.id));
   }
   const name = document.createElement("strong");
   name.className = "follow-rule-row-name";
@@ -374,11 +399,11 @@ function createFollowRuleRow(type, group) {
   summary.appendChild(name);
   const count = document.createElement("span");
   count.className = "follow-rule-row-count";
-  count.textContent = type === "keyword"
+  count.textContent = isFollowRuleKeywordType(type)
     ? `${group.rules.length} 条规则`
     : `${group.items.length} 个${config.itemLabel}`;
-  if (type !== "keyword") summary.appendChild(count);
-  if (group.enabled === false && type !== "keyword") {
+  if (!isCardGroup) summary.appendChild(count);
+  if (group.enabled === false && !isCardGroup) {
     const status = document.createElement("span");
     status.className = "follow-rule-row-status";
     status.textContent = "已禁用";
@@ -388,18 +413,18 @@ function createFollowRuleRow(type, group) {
   const actions = document.createElement("div");
   actions.className = "follow-rule-row-actions";
   let cardMeta = null;
-  if (type === "keyword") {
+  if (isCardGroup) {
     const enabledLabel = document.createElement("label");
     enabledLabel.className = "switch switch-small follow-rule-card-switch";
     const enabledInput = document.createElement("input");
     enabledInput.className = "switch-input";
     enabledInput.type = "checkbox";
     enabledInput.checked = group.enabled !== false;
-    enabledInput.setAttribute("aria-label", `${enabledInput.checked ? "停用" : "启用"}关键词组 ${group.name}`);
+    enabledInput.setAttribute("aria-label", `${enabledInput.checked ? "停用" : "启用"}${config.groupLabel} ${group.name}`);
     enabledInput.addEventListener("change", () => {
       group.enabled = enabledInput.checked;
       row.classList.toggle("is-disabled", group.enabled === false);
-      enabledInput.setAttribute("aria-label", `${enabledInput.checked ? "停用" : "启用"}关键词组 ${group.name}`);
+      enabledInput.setAttribute("aria-label", `${enabledInput.checked ? "停用" : "启用"}${config.groupLabel} ${group.name}`);
       showPendingSaveToast();
     });
     const enabledTrack = document.createElement("span");
@@ -428,19 +453,19 @@ function createFollowRuleRow(type, group) {
   deleteButton.addEventListener("click", () => confirmFollowRuleGroupRemoval(type, group.id));
   actions.append(styleButton, deleteButton);
 
-  if (type === "keyword") {
+  if (isCardGroup) {
     row.append(summary, cardMeta);
   } else {
     row.append(summary, actions);
   }
-  if (type === "keyword" && expandedFollowRuleGroupId === group.id) {
+  if (isCardGroup && expandedFollowRuleGroupId === group.id) {
     const editor = document.createElement("div");
     editor.className = "follow-rule-inline-editor";
     editor.dataset.followRuleInlineEditor = group.id;
     row.appendChild(editor);
     if (!pendingFollowRuleEditor?.inline || pendingFollowRuleEditor.groupId !== group.id) {
       pendingFollowRuleEditor = {
-        type: "keyword",
+        type,
         groupId: group.id,
         ruleMode: "all",
         editingRuleId: "",
@@ -453,29 +478,38 @@ function createFollowRuleRow(type, group) {
   return row;
 }
 
-function setFollowRuleCardBorderColor(row, group) {
-  const borderStyle = normalizeFollowRuleStyles(group.styles, "keyword").borderColor;
+function setFollowRuleCardBorderColor(row, group, type = "keyword") {
+  const borderStyle = normalizeFollowRuleStyles(group.styles, type).borderColor;
   row.style.setProperty("--follow-rule-card-border-color", borderStyle.enabled ? borderStyle.color : "#ffffff");
 }
 
 function createAndExpandFollowKeywordGroup() {
-  const group = createFollowRuleGroup("keyword");
-  followRulesDraft.keywordGroups.push(group);
+  createAndExpandFollowRuleCardGroup("keyword");
+}
+
+function createAndExpandFollowRuleCardGroup(type) {
+  const config = FOLLOW_RULE_TYPE_CONFIG[type];
+  const group = createFollowRuleGroup(type);
+  followRulesDraft[config.collectionKey].push(group);
   expandedFollowRuleGroupId = group.id;
   pendingFollowRuleEditor = {
-    type: "keyword",
+    type,
     groupId: group.id,
     ruleMode: "all",
     editingRuleId: "",
     inline: true,
     group
   };
-  renderFollowRuleGroups("keyword");
+  renderFollowRuleCardGroups();
   showPendingSaveToast();
-  followKeywordGroupsNode.querySelector(`[data-follow-rule-inline-editor="${group.id}"] .follow-rule-name-input`)?.focus();
+  getFollowRuleListNode(type).querySelector(`[data-follow-rule-inline-editor="${group.id}"] .follow-rule-name-input`)?.focus();
 }
 
 function toggleFollowKeywordGroupEditor(groupId) {
+  toggleFollowRuleCardEditor("keyword", groupId);
+}
+
+function toggleFollowRuleCardEditor(type, groupId) {
   if (expandedFollowRuleGroupId === groupId) {
     expandedFollowRuleGroupId = "";
     if (pendingFollowRuleEditor?.inline) pendingFollowRuleEditor = null;
@@ -483,11 +517,18 @@ function toggleFollowKeywordGroupEditor(groupId) {
     expandedFollowRuleGroupId = groupId;
     pendingFollowRuleEditor = null;
   }
+  renderFollowRuleCardGroups();
+}
+
+function renderFollowRuleCardGroups() {
   renderFollowRuleGroups("keyword");
+  renderFollowRuleGroups("signature");
 }
 
 function getFollowRuleListNode(type) {
-  return type === "user" ? followUserGroupsNode : followKeywordGroupsNode;
+  if (type === "signature") return followSignatureGroupsNode;
+  if (type === "user") return followUserGroupsNode;
+  return followKeywordGroupsNode;
 }
 
 function getFollowRuleGroup(type, groupId) {
@@ -526,7 +567,7 @@ function openFollowRuleEditor(type, groupId = "") {
   if (expandedFollowRuleGroupId) {
     expandedFollowRuleGroupId = "";
     pendingFollowRuleEditor = null;
-    renderFollowRuleGroups("keyword");
+    renderFollowRuleCardGroups();
   }
   const source = groupId ? getFollowRuleGroup(type, groupId) : createFollowRuleGroup(type);
   if (!source) {
@@ -622,10 +663,11 @@ function confirmFollowRuleStyleDialog() {
     const normalizedStyles = normalizeFollowRuleStyles(styles, type);
     const changed = JSON.stringify(group.styles) !== JSON.stringify(normalizedStyles);
     group.styles = normalizedStyles;
-    if (type === "keyword") {
-      const row = [...followKeywordGroupsNode.querySelectorAll("[data-follow-rule-group-id]")]
+    if (isFollowRuleKeywordType(type)) {
+      const list = getFollowRuleListNode(type);
+      const row = [...list.querySelectorAll("[data-follow-rule-group-id]")]
         .find((node) => node.dataset.followRuleGroupId === groupId);
-      if (row) setFollowRuleCardBorderColor(row, group);
+      if (row) setFollowRuleCardBorderColor(row, group, type);
     }
     if (changed) {
       showPendingSaveToast();
@@ -674,7 +716,7 @@ function renderFollowRuleEditorBody(container) {
   mainFields.className = `follow-rule-main-fields${pendingFollowRuleEditor.groupId ? "" : " is-new"}`;
   mainFields.appendChild(nameLabel);
 
-  if (type !== "keyword" && pendingFollowRuleEditor.groupId) {
+  if (!isFollowRuleKeywordType(type) && pendingFollowRuleEditor.groupId) {
     const statusLabel = document.createElement("label");
     const statusText = document.createElement("span");
     statusText.textContent = "状态";
@@ -698,7 +740,7 @@ function renderFollowRuleEditorBody(container) {
   }
 
   container.appendChild(mainFields);
-  if (type === "keyword") {
+  if (isFollowRuleKeywordType(type)) {
     container.appendChild(createFollowRuleKeywordEditor(group));
   } else if (pendingFollowRuleEditor.groupId) {
     container.appendChild(createFollowRuleItemEditor(group, config));
@@ -707,13 +749,14 @@ function renderFollowRuleEditorBody(container) {
 
 function getCurrentFollowRuleEditorRoot() {
   if (!pendingFollowRuleEditor?.inline) return followRuleDialogBody;
-  return [...followKeywordGroupsNode.querySelectorAll("[data-follow-rule-inline-editor]")]
+  const list = getFollowRuleListNode(pendingFollowRuleEditor.type);
+  return [...list.querySelectorAll("[data-follow-rule-inline-editor]")]
     .find((node) => node.dataset.followRuleInlineEditor === pendingFollowRuleEditor.groupId) || null;
 }
 
 function renderPendingFollowRuleEditor() {
   if (pendingFollowRuleEditor?.inline) {
-    renderFollowRuleGroups("keyword");
+    renderFollowRuleGroups(pendingFollowRuleEditor.type);
   } else {
     renderFollowRuleDialogBody();
   }
@@ -1127,7 +1170,7 @@ function appendFollowRuleRequiredPreview(container, rule) {
 }
 
 function addPendingFollowRuleItems() {
-  if (!pendingFollowRuleEditor || pendingFollowRuleEditor.type !== "keyword") return;
+  if (!pendingFollowRuleEditor || !isFollowRuleKeywordType(pendingFollowRuleEditor.type)) return;
 
   const { group } = pendingFollowRuleEditor;
   const editingRule = group.rules.find((rule) => rule.id === pendingFollowRuleEditor.editingRuleId);
@@ -1207,7 +1250,7 @@ function removePendingFollowRuleItem(itemValue, listKey = "items") {
 }
 
 function removePendingFollowRuleKeywordRule(ruleId) {
-  if (!pendingFollowRuleEditor || pendingFollowRuleEditor.type !== "keyword") return;
+  if (!pendingFollowRuleEditor || !isFollowRuleKeywordType(pendingFollowRuleEditor.type)) return;
   pendingFollowRuleEditor.group.rules = pendingFollowRuleEditor.group.rules
     .filter((rule) => rule.id !== ruleId);
   if (pendingFollowRuleEditor.editingRuleId === ruleId) {
@@ -1225,7 +1268,7 @@ function createFollowRuleStyleEditor(type, styles) {
   const grid = document.createElement("div");
   grid.className = "follow-rule-style-grid";
 
-  FOLLOW_RULE_STYLE_DEFINITIONS.forEach((definition) => {
+  (type === "signature" ? [] : FOLLOW_RULE_STYLE_DEFINITIONS).forEach((definition) => {
     const label = document.createElement("label");
     label.className = "follow-rule-style-option";
     const checkbox = document.createElement("input");
@@ -1270,9 +1313,8 @@ function createFollowRuleStyleEditor(type, styles) {
     grid.appendChild(label);
   });
 
-  if (type === "user") {
-    grid.appendChild(createFollowRuleAvatarEffectEditor(styles));
-  }
+  if (type === "user") grid.appendChild(createFollowRuleAvatarEffectEditor(styles));
+  if (type === "signature") grid.appendChild(createFollowRuleSignatureEffectEditor(styles));
 
   fieldset.appendChild(grid);
   return fieldset;
@@ -1312,6 +1354,53 @@ function createFollowRuleAvatarEffectEditor(styles) {
     styles.avatarEffect = normalizeFollowRuleAvatarEffect(select.value);
     preview.dataset.nshAvatarEffect = styles.avatarEffect;
     renderFollowRuleAvatarEffectLayers(effect, styles.avatarEffect);
+  };
+  select.addEventListener("change", updatePreview);
+  updatePreview();
+
+  editor.append(control, preview);
+  return editor;
+}
+
+function createFollowRuleSignatureEffectEditor(styles) {
+  const editor = document.createElement("div");
+  editor.className = "follow-rule-avatar-effect-option";
+
+  const control = document.createElement("label");
+  control.className = "follow-rule-avatar-effect-control follow-rule-signature-effect-control";
+  const text = document.createElement("span");
+  text.textContent = "签名特效";
+  const select = document.createElement("select");
+  FOLLOW_RULE_AVATAR_EFFECT_OPTIONS.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.value;
+    option.textContent = entry.label;
+    select.appendChild(option);
+  });
+  select.value = styles.signatureEffect;
+  const hint = document.createElement("small");
+  hint.textContent = "命中时对整条签名应用特效，并高亮命中的关键词";
+  control.append(text, select, hint);
+
+  const preview = document.createElement("div");
+  preview.className = "follow-rule-signature-preview nsh-signature-effect-host nsh-avatar-effect-host";
+  preview.setAttribute("aria-hidden", "true");
+  preview.append(
+    document.createTextNode("我的 "),
+    Object.assign(document.createElement("span"), {
+      className: "nsh-follow-signature-keyword-hit",
+      textContent: "探针"
+    }),
+    document.createTextNode(" ｜ VPS")
+  );
+  const effect = document.createElement("span");
+  effect.className = "nsh-follow-signature-effect nsh-avatar-effect";
+  preview.appendChild(effect);
+
+  const updatePreview = () => {
+    styles.signatureEffect = normalizeFollowRuleAvatarEffect(select.value);
+    preview.dataset.nshAvatarEffect = styles.signatureEffect;
+    renderFollowRuleAvatarEffectLayers(effect, styles.signatureEffect);
   };
   select.addEventListener("change", updatePreview);
   updatePreview();

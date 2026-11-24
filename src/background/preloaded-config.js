@@ -105,6 +105,15 @@ async function importPreloadedConfiguration() {
     .map((key) => [key, payload.options[key]]));
   if (Object.keys(options).length === 0) return false;
 
+  if (!Object.hasOwn(saved, "followRules")) {
+    const rules = options.followRules;
+    options.followRules = {
+      keywordGroups: Array.isArray(rules?.keywordGroups) ? rules.keywordGroups : [],
+      signatureGroups: Array.isArray(rules?.signatureGroups) ? rules.signatureGroups : [],
+      userGroups: Array.isArray(rules?.userGroups) ? rules.userGroups : []
+    };
+  }
+
   await chrome.storage.local.set({ ...options, [PRELOADED_CONFIG_MARKER_KEY]: true });
   return true;
 }

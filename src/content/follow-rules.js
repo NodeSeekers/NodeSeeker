@@ -26,6 +26,11 @@ const FOLLOW_RULE_TYPE_CONFIG = {
     groupLabel: "标记关键词组",
     itemLabel: "关键词"
   },
+  signature: {
+    collectionKey: "signatureGroups",
+    groupLabel: "标记签名组",
+    itemLabel: "签名关键词"
+  },
   user: {
     collectionKey: "userGroups",
     groupLabel: "标记用户组",
@@ -39,11 +44,17 @@ function normalizeFollowRules(value) {
   const source = isFollowRuleObject(value) ? value : {};
   const usedIds = new Set();
   const keywordGroups = normalizeFollowRuleGroups(source.keywordGroups, "keyword", usedIds);
+  const signatureGroups = normalizeFollowRuleGroups(source.signatureGroups, "signature", usedIds);
   const userGroups = normalizeFollowRuleGroups(source.userGroups, "user", usedIds);
   return {
     keywordGroups: removeDuplicateFollowRuleItems(keywordGroups, "keyword"),
+    signatureGroups: removeDuplicateFollowRuleItems(signatureGroups, "signature"),
     userGroups
   };
+}
+
+function isFollowRuleKeywordType(type) {
+  return type === "keyword" || type === "signature";
 }
 
 function normalizeFollowRuleGroups(value, type, usedIds) {
@@ -63,7 +74,7 @@ function normalizeFollowRuleGroups(value, type, usedIds) {
         enabled: group.enabled !== false,
         styles: normalizeFollowRuleStyles(group.styles, type)
       };
-      if (type === "keyword") {
+      if (isFollowRuleKeywordType(type)) {
         normalizedGroup.rules = normalizeFollowRuleKeywordRules(group, normalizedGroup.id, usedIds);
       } else {
         normalizedGroup.items = normalizeBlockFilterList(group.items);
@@ -115,7 +126,7 @@ function normalizeFollowRuleMatchMode(value, itemCount = 0) {
 }
 
 function removeDuplicateFollowRuleItems(groups, type) {
-  if (type === "keyword") return groups;
+  if (isFollowRuleKeywordType(type)) return groups;
   const seen = new Set();
   return groups.map((group) => ({
     ...group,
@@ -132,7 +143,7 @@ function removeDuplicateFollowRuleItems(groups, type) {
 
 function getFollowRuleItemIdentity(type, value) {
   const normalized = normalizeFollowRuleText(value);
-  return type === "keyword" ? normalized.toLocaleLowerCase() : normalized;
+  return isFollowRuleKeywordType(type) ? normalized.toLocaleLowerCase() : normalized;
 }
 
 function normalizeFollowRuleStyles(value, type = "") {
@@ -143,11 +154,15 @@ function normalizeFollowRuleStyles(value, type = "") {
       ? normalizeFollowRuleAvatarEffect(styles.avatarEffect)
       : "none"
   };
+  if (type === "signature") {
+    normalized.showGroupName = false;
+    normalized.signatureEffect = normalizeFollowRuleAvatarEffect(styles.signatureEffect);
+  }
 
   Object.entries(FOLLOW_RULE_STYLE_COLOR_DEFAULTS).forEach(([key, defaultColor]) => {
     const option = isFollowRuleObject(styles[key]) ? styles[key] : {};
     normalized[key] = {
-      enabled: option.enabled === true,
+      enabled: type !== "signature" && option.enabled === true,
       color: normalizeFollowRuleColor(option.color, defaultColor)
     };
   });
@@ -204,7 +219,7 @@ async function getFollowRuleGroupOptions(type, value) {
     id: group.id,
     name: group.name,
     enabled: group.enabled,
-    followed: type === "keyword"
+    followed: isFollowRuleKeywordType(type)
       ? group.rules.some((rule) => rule.terms.length === 1
         && getFollowRuleItemIdentity(type, rule.terms[0]) === identity)
       : group.items.some((item) => getFollowRuleItemIdentity(type, item) === identity)
@@ -273,7 +288,7 @@ async function assignFollowRuleItemToGroup(type, value, groupId) {
   }
 
   const identity = getFollowRuleItemIdentity(type, normalizedValue);
-  if (type === "keyword") {
+  if (isFollowRuleKeywordType(type)) {
     groups.forEach((entry) => {
       if (entry.id === groupId) return;
       entry.rules = entry.rules.filter((rule) => !(rule.terms.length === 1
@@ -344,7 +359,7 @@ async function createNamedFollowRuleGroup(type, name, value, selectedGroupIds = 
         group.items.push(normalizedValue);
       }
     });
-  } else if (type !== "user") {
+  } else if (isFollowRuleKeywordType(type)) {
     groups.forEach((group) => {
       group.rules = group.rules.filter((rule) => !(rule.terms.length === 1
         && getFollowRuleItemIdentity(type, rule.terms[0]) === identity));
@@ -354,12 +369,13 @@ async function createNamedFollowRuleGroup(type, name, value, selectedGroupIds = 
     id: createFollowRuleStorageId(type, rules),
     name: normalizedName,
     enabled: true,
-    ...(type === "keyword"
+    ...(isFollowRuleKeywordType(type)
       ? { rules: [createFollowRuleSingleKeywordRule(normalizedValue)] }
       : { items: [normalizedValue] }),
     styles: normalizeFollowRuleStyles({
-      showGroupName: true,
+      showGroupName: type !== "signature",
       avatarEffect: type === "user" ? "rainbow" : "none",
+      signatureEffect: type === "signature" ? "rainbow" : "none",
       groupNameColor: {
         enabled: true,
         color: FOLLOW_RULE_STYLE_COLOR_DEFAULTS.groupNameColor
@@ -386,6 +402,7 @@ function createFollowRuleSingleKeywordRule(term) {
 function createFollowRuleStorageId(type, rules) {
   const usedIds = new Set([
     ...rules.keywordGroups.map((group) => group.id),
+    ...rules.signatureGroups.map((group) => group.id),
     ...rules.userGroups.map((group) => group.id)
   ]);
   const randomPart = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -861,6 +878,17 @@ function getCompiledFollowRules() {
           normalizedExcludedItems: rule.excludeTerms.map((item) => item.toLocaleLowerCase())
         }))
       })),
+    signatureGroups: normalized.signatureGroups
+      .filter((group) => group.enabled)
+      .map((group) => ({
+        ...group,
+        rules: group.rules.map((rule) => ({
+          ...rule,
+          normalizedItems: rule.terms.map((item) => item.toLocaleLowerCase()),
+          normalizedTermGroups: rule.termGroups.map((terms) => terms.map((item) => item.toLocaleLowerCase())),
+          normalizedExcludedItems: rule.excludeTerms.map((item) => item.toLocaleLowerCase())
+        }))
+      })),
     userGroups: normalized.userGroups
       .filter((group) => group.enabled)
       .map((group) => ({
@@ -932,7 +960,9 @@ function getFollowRuleTargetContext(root, isDetailPage) {
       authorName,
       avatarElement,
       titleElement: null,
-      titleText: ""
+      titleText: "",
+      signatureElement: root.querySelector(".signature"),
+      signatureText: normalizeFollowRuleText(root.querySelector(".signature")?.textContent)
     };
   }
 
@@ -1018,17 +1048,29 @@ function getFollowRuleDecoration(context, rules) {
       matchedRules: getMatchingFollowRuleKeywordRules(group, normalizedTitle)
     }))
     : [];
+  const normalizedSignature = context.type === "detail"
+    ? normalizeFollowRuleText(context.signatureText).toLocaleLowerCase()
+    : "";
+  const signatureGroups = normalizedSignature
+    ? (rules.signatureGroups || []).map((group) => ({
+      ...group,
+      matchedRules: getMatchingFollowRuleKeywordRules(group, normalizedSignature)
+    })).filter((group) => group.matchedRules.length > 0)
+    : [];
   const userGroups = context.authorName
     ? rules.userGroups.filter((group) => group.itemSet.has(context.authorName))
     : [];
 
-  if (keywordGroups.length === 0 && userGroups.length === 0) {
+  if (keywordGroups.length === 0 && signatureGroups.length === 0 && userGroups.length === 0) {
     return null;
   }
 
   const keywordTerms = keywordGroups
     .flatMap((group) => group.matchedRules.flatMap((rule) => rule.normalizedItems))
     .filter((keyword) => normalizedTitle.includes(keyword.toLocaleLowerCase()));
+  const signatureTerms = signatureGroups
+    .flatMap((group) => group.matchedRules.flatMap((rule) => rule.normalizedItems))
+    .filter((keyword) => normalizedSignature.includes(keyword.toLocaleLowerCase()));
   const groupBadges = [
     ...getFollowRuleGroupBadges(userGroups, "user"),
     ...getFollowRuleGroupBadges(keywordGroups, "keyword")
@@ -1047,6 +1089,10 @@ function getFollowRuleDecoration(context, rules) {
     avatarEffect: context.avatarElement
       ? resolveFollowRuleAvatarEffect(userGroups)
       : "",
+    signatureEffect: context.signatureElement
+      ? resolveFollowRuleSignatureEffect(signatureGroups)
+      : "",
+    signatureTerms: [...new Set(signatureTerms)],
     borderColor: resolveFollowRuleColor("borderColor", userGroups, keywordGroups),
     backgroundColor: resolveFollowRuleColor("backgroundColor", userGroups, keywordGroups),
     keywordTerms: [...new Set(keywordTerms)]
@@ -1088,8 +1134,14 @@ function resolveFollowRuleColor(styleKey, userGroups, keywordGroups) {
 }
 
 function resolveFollowRuleAvatarEffect(userGroups) {
-  const group = userGroups.find((entry) => entry.styles.avatarEffect !== "none");
+  const group = userGroups
+    .find((entry) => entry.styles.avatarEffect !== "none");
   return group?.styles.avatarEffect || "";
+}
+
+function resolveFollowRuleSignatureEffect(signatureGroups) {
+  const group = signatureGroups.find((entry) => entry.styles.signatureEffect !== "none");
+  return group?.styles.signatureEffect || "";
 }
 
 function hasVisibleFollowRuleDecoration(decoration) {
@@ -1098,6 +1150,8 @@ function hasVisibleFollowRuleDecoration(decoration) {
     || Boolean(decoration.keywordColor)
     || Boolean(decoration.usernameColor)
     || Boolean(decoration.avatarEffect)
+    || Boolean(decoration.signatureEffect)
+    || decoration.signatureTerms.length > 0
     || Boolean(decoration.borderColor)
     || Boolean(decoration.backgroundColor);
 }
@@ -1131,6 +1185,10 @@ function updateFollowRuleDecoration(root, context, decoration) {
   applyFollowRuleRootStyles(root, decoration);
   applyFollowRuleTextStyles(context, decoration);
   applyFollowRuleAvatarEffect(context, decoration.avatarEffect);
+  if (decoration.signatureTerms.length > 0) {
+    highlightFollowRuleKeywords(context.signatureElement, decoration.signatureTerms, "", "nsh-follow-signature-keyword-hit");
+  }
+  applyFollowRuleSignatureEffect(context, decoration.signatureEffect);
   renderFollowRuleGroupBadges(context, decoration.groupBadges);
   root.dataset.nshFollowRuleSignature = signature;
 }
@@ -1140,13 +1198,13 @@ function hasExistingFollowRuleDecoration(root) {
     || root.classList.contains("nsh-follow-border")
     || root.classList.contains("nsh-follow-background")
     || Boolean(root.querySelector(
-      ".nsh-follow-group-list, .nsh-follow-keyword-hit, .nsh-follow-title, .nsh-follow-username, .nsh-follow-avatar"
+      ".nsh-follow-group-list, .nsh-follow-keyword-hit, .nsh-follow-signature-keyword-hit, .nsh-follow-title, .nsh-follow-username, .nsh-follow-avatar, .nsh-follow-signature-effect"
     ));
 }
 
 function isFollowRuleDecorationCurrent(root, context, decoration) {
   if (!decoration) {
-    return !root.querySelector(".nsh-follow-group-list, .nsh-follow-keyword-hit, .nsh-follow-avatar")
+    return !root.querySelector(".nsh-follow-group-list, .nsh-follow-keyword-hit, .nsh-follow-signature-keyword-hit, .nsh-follow-avatar, .nsh-follow-signature-effect")
       && !root.classList.contains("nsh-follow-border")
       && !root.classList.contains("nsh-follow-background");
   }
@@ -1178,6 +1236,22 @@ function isFollowRuleDecorationCurrent(root, context, decoration) {
   ) {
     return false;
   }
+  const signatureHost = context.signatureElement?.querySelector(":scope > .nsh-follow-signature");
+  if (Boolean(decoration.signatureEffect) !== Boolean(signatureHost)) {
+    return false;
+  }
+  if (
+    decoration.signatureEffect
+    && (
+      signatureHost.dataset.nshAvatarEffect !== decoration.signatureEffect
+      || !signatureHost.querySelector(".nsh-follow-signature-effect")
+    )
+  ) {
+    return false;
+  }
+  if (Boolean(decoration.signatureTerms.length) !== Boolean(context.signatureElement?.querySelector(".nsh-follow-signature-keyword-hit"))) {
+    return false;
+  }
   if (decoration.keywordColor && !context.titleElement?.querySelector(".nsh-follow-keyword-hit")) {
     return false;
   }
@@ -1187,7 +1261,7 @@ function isFollowRuleDecorationCurrent(root, context, decoration) {
 
 function clearFollowRuleDecoration(root) {
   root.querySelectorAll(".nsh-follow-group-list").forEach((node) => node.remove());
-  root.querySelectorAll(".nsh-follow-keyword-hit").forEach((node) => {
+  root.querySelectorAll(".nsh-follow-keyword-hit, .nsh-follow-signature-keyword-hit").forEach((node) => {
     const parent = node.parentNode;
     node.replaceWith(...node.childNodes);
     parent?.normalize();
@@ -1201,11 +1275,15 @@ function clearFollowRuleDecoration(root) {
     node.style.removeProperty("--nsh-follow-username-color");
   });
   root.querySelectorAll(".nsh-follow-avatar-effect").forEach((node) => node.remove());
+  root.querySelectorAll(".nsh-follow-signature-effect").forEach((node) => node.remove());
   root.querySelectorAll(".nsh-follow-avatar").forEach((node) => {
     node.classList.remove("nsh-follow-avatar", "nsh-avatar-effect-host");
     node.style.removeProperty("--nsh-avatar-image-radius");
     node.style.removeProperty("--nsh-avatar-effect-radius");
     delete node.dataset.nshAvatarEffect;
+  });
+  root.querySelectorAll(".nsh-follow-signature").forEach((node) => {
+    node.replaceWith(...node.childNodes);
   });
   root.classList.remove("nsh-follow-border", "nsh-follow-background");
   root.style.removeProperty("--nsh-follow-border-color");
@@ -1270,6 +1348,30 @@ function applyFollowRuleAvatarEffect(context, avatarEffect) {
   avatar.appendChild(effect);
 }
 
+function applyFollowRuleSignatureEffect(context, signatureEffect) {
+  const signature = context.signatureElement;
+  if (!signature || !signatureEffect) return;
+
+  const host = document.createElement("div");
+  host.className = "nsh-follow-signature nsh-signature-effect-host nsh-avatar-effect-host";
+  host.dataset.nshAvatarEffect = signatureEffect;
+  host.append(...signature.childNodes);
+
+  const effect = document.createElement("span");
+  effect.className = "nsh-follow-signature-effect nsh-avatar-effect";
+  effect.setAttribute("aria-hidden", "true");
+  const layerCount = FOLLOW_RULE_AVATAR_EFFECT_LAYER_COUNTS[signatureEffect] || 0;
+  Array.from({ length: layerCount }, (_, index) => {
+    const layer = document.createElement("span");
+    layer.className = "nsh-avatar-effect-layer";
+    if (index === 0) layer.classList.add("is-primary");
+    else if (index === 1) layer.classList.add("is-secondary");
+    return layer;
+  }).forEach((layer) => effect.appendChild(layer));
+  host.appendChild(effect);
+  signature.appendChild(host);
+}
+
 function getFollowRuleAvatarImageRadius(avatar) {
   const candidates = [
     avatar.querySelector("img"),
@@ -1325,7 +1427,7 @@ function renderFollowRuleGroupBadges(context, badges) {
   host.insertBefore(list, profileStats || null);
 }
 
-function highlightFollowRuleKeywords(root, keywords, color) {
+function highlightFollowRuleKeywords(root, keywords, color, className = "nsh-follow-keyword-hit") {
   const normalizedKeywords = [...new Set(
     keywords.map((keyword) => keyword.toLocaleLowerCase()).filter(Boolean)
   )].sort((left, right) => right.length - left.length);
@@ -1356,8 +1458,8 @@ function highlightFollowRuleKeywords(root, keywords, color) {
       }
 
       const mark = document.createElement("span");
-      mark.className = "nsh-follow-keyword-hit";
-      mark.style.setProperty("--nsh-follow-keyword-color", color);
+      mark.className = className;
+      if (color) mark.style.setProperty("--nsh-follow-keyword-color", color);
       mark.textContent = part.text;
       fragment.appendChild(mark);
     });

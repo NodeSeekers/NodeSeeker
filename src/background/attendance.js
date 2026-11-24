@@ -2,7 +2,8 @@ const AUTO_ATTENDANCE_ALARM_NAME = "nshAttendance:auto";
 const AUTO_ATTENDANCE_STATE_KEY = "nshAutoAttendanceState";
 const AUTO_ATTENDANCE_RETRY_INTERVAL_MS = 5 * 60 * 1000;
 const AUTO_ATTENDANCE_FIRST_CHECK_DELAY_MS = 60 * 1000;
-const AUTO_ATTENDANCE_WINDOW_MS = 60 * 60 * 1000;
+const AUTO_ATTENDANCE_DAY_MS = 24 * 60 * 60 * 1000;
+const AUTO_ATTENDANCE_WINDOW_MS = 10 * 60 * 1000;
 const AUTO_ATTENDANCE_REQUEST_TIMEOUT_MS = 15 * 1000;
 let autoAttendanceScheduling = Promise.resolve();
 let autoAttendanceRunning = false;
@@ -35,7 +36,7 @@ async function scheduleAutoAttendanceAlarmOnce() {
     const attemptedAt = Number(previous.attemptedAt) || 0;
     nextAttemptAt = Math.max(now + 30_000, attemptedAt + AUTO_ATTENDANCE_RETRY_INTERVAL_MS);
   } else {
-    const midnight = getNextAutoAttendanceMidnightTimestamp(now) - 24 * AUTO_ATTENDANCE_WINDOW_MS;
+    const midnight = getNextAutoAttendanceMidnightTimestamp(now) - AUTO_ATTENDANCE_DAY_MS;
     const windowEnd = midnight + AUTO_ATTENDANCE_WINDOW_MS;
     let scheduledAt = previous?.dateKey === dateKey && previous.status === "scheduled"
       ? Number(previous.scheduledAt) : 0;
